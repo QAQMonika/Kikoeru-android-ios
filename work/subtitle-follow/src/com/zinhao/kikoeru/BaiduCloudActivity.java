@@ -23,6 +23,7 @@ public final class BaiduCloudActivity extends Activity {
     @Override public void onBackPressed() { controller.back(); }
     @Override protected void onSaveInstanceState(Bundle state) { controller.onSaveInstanceState(state); super.onSaveInstanceState(state); }
     @Override protected void onStart() { super.onStart(); controller.onStart(); }
+    @Override protected void onResume() { super.onResume(); controller.onStart(); }
     @Override protected void onStop() { controller.onStop(); super.onStop(); }
     @Override protected void onDestroy() { controller.onDestroy(); super.onDestroy(); }
 }

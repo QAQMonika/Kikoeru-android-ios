@@ -204,6 +204,18 @@ public final class AppShell {
                 }
                 @Override public void onChildViewDetachedFromWindow(View view) {}
             });
+
+            recycler.getViewTreeObserver().addOnWindowFocusChangeListener(hasFocus -> {
+                if (!hasFocus) return;
+                recycler.post(() -> {
+                    if (activity.isFinishing() || activity.isDestroyed()) return;
+                    refresh();
+                    Object treeAdapter = getWorkTreeAdapter();
+                    if (treeAdapter != null && !isBrowsingWorks()) {
+                        invokeMethod(treeAdapter, "notifyDataSetChanged");
+                    }
+                });
+            });
         }
 
         private Object getField(Object target, String name) {
@@ -496,16 +508,26 @@ public final class AppShell {
             tvTitle.setLineSpacing(0f, 1.12f);
 
             Object tagObj = row.getTag();
+            org.json.JSONObject work = getWork();
+            long workId = work != null ? work.optLong("id", 0L) : 0L;
+            org.json.JSONObject lastPlayed = workId != 0L ? TrackResume.lastPlayedForOnlineWork(activity, workId) : null;
             if (tagObj instanceof org.json.JSONObject) {
                 org.json.JSONObject item = (org.json.JSONObject)tagObj;
                 boolean cached = item.optBoolean("file_exists", false);
-                tvTitle.setTextColor(cached ? (light ? 0xff11685f : 0xff7ae0c6) : ink);
+                String type = item.optString("type", "");
+                boolean isLastAudio = "audio".equals(type) && isSameOnlineTrack(item, lastPlayed);
+                if (isLastAudio) {
+                    bg.setColor(light ? 0x16fa2d48 : 0x20fa2d48);
+                    bg.setStroke(Math.max(1, dp(activity, 1.0f)), 0x55fa2d48);
+                    tvTitle.setTextColor(GlassUi.RED);
+                } else {
+                    tvTitle.setTextColor(cached ? (light ? 0xff11685f : 0xff7ae0c6) : ink);
+                }
 
                 int pbId = id(activity, "pb1");
                 View pb = pbId != 0 ? row.findViewById(pbId) : null;
                 boolean downloading = pb != null && pb.getVisibility() == View.VISIBLE;
                 if (!downloading) {
-                    String type = item.optString("type", "");
                     if ("audio".equals(type)) {
                         double sec = item.optDouble("duration", 0.0);
                         String durStr = formatTrackSeconds(sec);
@@ -515,20 +537,41 @@ public final class AppShell {
                         else sub.append("\u97f3\u9891");
                         if (hasLrc) sub.append("   \ud83d\udcac");
                         if (cached) sub.append("   \u00b7 \u5df2\u7f13\u5b58");
-                        tvCount.setText(sub.toString());
+                        String badge = TrackResume.buildTrackBadge(activity, item, workId, isLastAudio, lastPlayed);
+                        GlassUi.setColoredSubtitle(tvCount, sub.toString(), badge, muted,
+                                isLastAudio ? GlassUi.RED : ThemePalettes.accent(cardColor));
                     } else if ("text".equals(type)) {
                         tvCount.setText("\u5b57\u5e55 / \u6587\u672c" + (cached ? " \u00b7 \u5df2\u7f13\u5b58" : ""));
+                        tvCount.setTextColor(muted);
                     } else if ("image".equals(type)) {
                         tvCount.setText("\u56fe\u7247" + (cached ? " \u00b7 \u5df2\u7f13\u5b58" : ""));
+                        tvCount.setTextColor(muted);
+                    } else {
+                        tvCount.setTextColor(muted);
                     }
-                    tvCount.setTextColor(muted);
                 }
             } else {
                 // Folder row
-                tvTitle.setTextColor(ink);
-                tvCount.setTextColor(muted);
+                String folderName = tvTitle.getText() != null ? tvTitle.getText().toString() : "";
+                org.json.JSONObject folderItem = findVisibleOnlineFolder(folderName);
+                boolean hasLast = lastPlayed != null && folderItem != null && onlineFolderContainsTrack(folderItem, lastPlayed);
+                String rawCount = tvCount.getText() != null ? tvCount.getText().toString() : "";
+                int mark = rawCount.indexOf("   \u00b7   \u4e0a\u6b21\u542c\u5230\u6b64\u76ee\u5f55");
+                if (mark >= 0) rawCount = rawCount.substring(0, mark);
+                else if (rawCount.startsWith("\u4e0a\u6b21\u542c\u5230\u6b64\u76ee\u5f55")) rawCount = "";
+                if (hasLast) {
+                    bg.setColor(light ? 0x16fa2d48 : 0x20fa2d48);
+                    bg.setStroke(Math.max(1, dp(activity, 1.0f)), 0x55fa2d48);
+                    tvTitle.setTextColor(GlassUi.RED);
+                    String badge = "\u4e0a\u6b21\u542c\u5230\u6b64\u76ee\u5f55 \u00b7 " + lastPlayed.optString("title");
+                    GlassUi.setColoredSubtitle(tvCount, rawCount, badge, muted, GlassUi.RED);
+                } else {
+                    tvTitle.setTextColor(ink);
+                    tvCount.setText(rawCount);
+                    tvCount.setTextColor(muted);
+                }
                 if (ivCover instanceof ImageView) {
-                    ((ImageView)ivCover).setImageTintList(ColorStateList.valueOf(0xff5aa7d4));
+                    ((ImageView)ivCover).setImageTintList(ColorStateList.valueOf(hasLast ? GlassUi.RED : 0xff5aa7d4));
                 }
             }
         }
@@ -824,6 +867,13 @@ public final class AppShell {
                 filesHeader.setText("\u6587\u4ef6");
             }
             filesHeader.setTextColor(ink);
+
+            org.json.JSONObject lastPlayed = workId != 0L ? TrackResume.lastPlayedForOnlineWork(activity, workId) : null;
+            org.json.JSONObject workProgress = trees != null ? TrackResume.workProgressOnline(activity, workId, trees) : null;
+            String subPath = (lastPlayed != null && trees != null) ? findOnlineTrackSubpath(trees, lastPlayed, "") : "";
+            final org.json.JSONObject resumeTarget = lastPlayed;
+            GlassUi.bindLastPlayedBanner(activity, root, lastPlayed, workProgress, cardColor, subPath,
+                    (resumeTarget != null && trees != null) ? () -> resumeOnlineLastPlayed(resumeTarget) : null);
         }
 
         private String buildOnlineCoverUrl(org.json.JSONObject work) {
@@ -962,6 +1012,153 @@ public final class AppShell {
                 }
             }
             return null;
+        }
+
+        private org.json.JSONObject findVisibleOnlineFolder(String folderTitle) {
+            if (folderTitle == null || folderTitle.isEmpty()) return null;
+            Object treeAdapter = getWorkTreeAdapter();
+            Object dataObj = getField(treeAdapter, "data");
+            if (!(dataObj instanceof org.json.JSONArray)) return null;
+            org.json.JSONArray arr = (org.json.JSONArray)dataObj;
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.optJSONObject(i);
+                if (item != null && "folder".equals(item.optString("type"))
+                        && folderTitle.equals(item.optString("title"))) {
+                    return item;
+                }
+            }
+            return null;
+        }
+
+        private static boolean isSameOnlineTrack(org.json.JSONObject item, org.json.JSONObject lastPlayed) {
+            if (item == null || lastPlayed == null) return false;
+            String targetHash = lastPlayed.optString("hash", "");
+            if (!targetHash.isEmpty()) return targetHash.equals(item.optString("hash", ""));
+            String targetTitle = lastPlayed.optString("title", "");
+            return !targetTitle.isEmpty() && targetTitle.equals(item.optString("title", ""));
+        }
+
+        private static boolean onlineFolderContainsTrack(org.json.JSONObject folderItem, org.json.JSONObject lastPlayed) {
+            if (folderItem == null || lastPlayed == null) return false;
+            org.json.JSONArray children = folderItem.optJSONArray("children");
+            if (children == null) return false;
+            for (int i = 0; i < children.length(); i++) {
+                org.json.JSONObject c = children.optJSONObject(i);
+                if (c == null) continue;
+                String t = c.optString("type", "");
+                if ("audio".equals(t) && isSameOnlineTrack(c, lastPlayed)) return true;
+                if ("folder".equals(t) && onlineFolderContainsTrack(c, lastPlayed)) return true;
+            }
+            return false;
+        }
+
+        private static String findOnlineTrackSubpath(org.json.JSONArray arr, org.json.JSONObject lastPlayed, String prefix) {
+            if (arr == null || lastPlayed == null) return "";
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+                String t = item.optString("type", "");
+                if ("audio".equals(t) && isSameOnlineTrack(item, lastPlayed)) return prefix;
+                if ("folder".equals(t)) {
+                    String title = item.optString("title", "");
+                    String next = prefix.isEmpty() ? title : prefix + "/" + title;
+                    String found = findOnlineTrackSubpath(item.optJSONArray("children"), lastPlayed, next);
+                    if (!found.isEmpty() || folderDirectlyContains(item.optJSONArray("children"), lastPlayed)) {
+                        return found.isEmpty() ? next : found;
+                    }
+                }
+            }
+            return "";
+        }
+
+        private static boolean folderDirectlyContains(org.json.JSONArray arr, org.json.JSONObject lastPlayed) {
+            if (arr == null || lastPlayed == null) return false;
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.optJSONObject(i);
+                if (item != null && "audio".equals(item.optString("type")) && isSameOnlineTrack(item, lastPlayed)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean collectOnlineResumeTarget(org.json.JSONArray arr, org.json.JSONObject lastPlayed,
+                java.util.List<org.json.JSONArray> folderChain, java.util.List<String> titleChain,
+                org.json.JSONObject[] foundTrack, org.json.JSONArray[] foundFolderData) {
+            if (arr == null || lastPlayed == null) return false;
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+                String t = item.optString("type", "");
+                if ("audio".equals(t) && isSameOnlineTrack(item, lastPlayed)) {
+                    foundTrack[0] = item;
+                    foundFolderData[0] = arr;
+                    return true;
+                }
+            }
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject item = arr.optJSONObject(i);
+                if (item != null && "folder".equals(item.optString("type"))) {
+                    org.json.JSONArray children = item.optJSONArray("children");
+                    if (children == null) continue;
+                    folderChain.add(arr);
+                    titleChain.add(item.optString("title", ""));
+                    if (collectOnlineResumeTarget(children, lastPlayed, folderChain, titleChain, foundTrack, foundFolderData)) {
+                        return true;
+                    }
+                    folderChain.remove(folderChain.size() - 1);
+                    titleChain.remove(titleChain.size() - 1);
+                }
+            }
+            return false;
+        }
+
+        @SuppressWarnings("unchecked")
+        private void resumeOnlineLastPlayed(org.json.JSONObject lastPlayed) {
+            try {
+                Object treeAdapter = getWorkTreeAdapter();
+                org.json.JSONArray trees = getTrees();
+                if (treeAdapter == null || trees == null || lastPlayed == null) return;
+                Object curData = getField(treeAdapter, "data");
+                if (curData instanceof org.json.JSONArray) {
+                    org.json.JSONArray curArr = (org.json.JSONArray)curData;
+                    for (int i = 0; i < curArr.length(); i++) {
+                        org.json.JSONObject item = curArr.optJSONObject(i);
+                        if (item != null && "audio".equals(item.optString("type")) && isSameOnlineTrack(item, lastPlayed)) {
+                            Method openMethod = activity.getClass().getDeclaredMethod("openAudioOrVideo", org.json.JSONObject.class);
+                            openMethod.setAccessible(true);
+                            openMethod.invoke(activity, item);
+                            return;
+                        }
+                    }
+                }
+                java.util.List<org.json.JSONArray> folderChain = new java.util.ArrayList<>();
+                java.util.List<String> titleChain = new java.util.ArrayList<>();
+                org.json.JSONObject[] foundTrack = new org.json.JSONObject[1];
+                org.json.JSONArray[] foundFolderData = new org.json.JSONArray[1];
+                if (!collectOnlineResumeTarget(trees, lastPlayed, folderChain, titleChain, foundTrack, foundFolderData)
+                        || foundTrack[0] == null || foundFolderData[0] == null) {
+                    GlassUi.toast(activity, "\u672a\u627e\u5230\u4e0a\u6b21\u64ad\u653e\u7684\u97f3\u8f68");
+                    return;
+                }
+                Object parentData = getField(treeAdapter, "parentData");
+                Object pathList = getField(treeAdapter, "pathList");
+                if (parentData instanceof java.util.List && pathList instanceof java.util.List) {
+                    ((java.util.List<Object>)parentData).clear();
+                    ((java.util.List<Object>)parentData).addAll(folderChain);
+                    ((java.util.List<Object>)pathList).clear();
+                    ((java.util.List<Object>)pathList).addAll(titleChain);
+                    Field dataField = treeAdapter.getClass().getDeclaredField("data");
+                    dataField.setAccessible(true);
+                    dataField.set(treeAdapter, foundFolderData[0]);
+                    treeAdapter.getClass().getMethod("mapFileExistValue").invoke(treeAdapter);
+                    treeAdapter.getClass().getMethod("notifyDataSetChanged").invoke(treeAdapter);
+                    refresh();
+                }
+                Method openMethod = activity.getClass().getDeclaredMethod("openAudioOrVideo", org.json.JSONObject.class);
+                openMethod.setAccessible(true);
+                openMethod.invoke(activity, foundTrack[0]);
+            } catch (Throwable ignored) {}
         }
     }
     static final class MiniHost extends FrameLayout {
@@ -1372,6 +1569,8 @@ public final class AppShell {
             }
         }
         void refreshPalette() {
+            if (local != null) local.onStart();
+            if (cloud != null) cloud.onStart();
             int current = ThemePalettes.selected(activity);
             boolean currentLiquid = PlaybackOptions.liquidGlass(activity);
             int page = ThemePalettes.color(current, 1);

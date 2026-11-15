@@ -119,11 +119,91 @@ public final class ResumeFavoritesTest {
         check(!LocalFavorites.key(new JSONObject().put("uri","content://another/document/primary%3ALibrary%2FA")).equals(LocalFavorites.key(direct)),"Different storage providers cannot collide");
         check(LocalFavorites.key(null).isEmpty(),"Null album identity is safe");
     }
+    private static void workLastPlayedAndProgress() throws Exception {
+        Context c=context("work-last-played");
+        // 1. Online work last-played + duration-weighted progress across nested tree
+        JSONObject t1=new JSONObject().put("type","audio").put("hash","77/0").put("workId",77L).put("title","01_intro.wav").put("duration",60.0);
+        JSONObject t2=new JSONObject().put("type","audio").put("hash","77/1").put("workId",77L).put("title","02_main.wav").put("duration",120.0);
+        JSONObject t3=new JSONObject().put("type","audio").put("hash","77/2").put("title","03_outro.wav").put("duration",60.0); // missing workId in tree, tests fallback
+        JSONArray trees=new JSONArray()
+                .put(new JSONObject().put("type","folder").put("title","01_wav").put("children",new JSONArray().put(t1).put(t2)))
+                .put(new JSONObject().put("type","folder").put("title","02_bonus").put("children",new JSONArray().put(t3)));
+
+        TrackResume.remember(c,t1,60000,60000); // completed (60s / 60s)
+        TrackResume.remember(c,new JSONObject(t3.toString()).put("workId",77L),30000,60000); // 50%
+        JSONObject onlineLast=TrackResume.lastPlayedForOnlineWork(c,77L);
+        check(onlineLast!=null && "03_outro.wav".equals(onlineLast.optString("title")),"Online work remembers most recent track");
+        check(onlineLast.optInt("percent",-1)==50,"Last played retains track percent");
+        check(TrackResume.lastPlayedForOnlineWork(c,88L)==null,"Unplayed online work has no last-played record");
+
+        JSONObject onlineProg=TrackResume.workProgressOnline(c,77L,trees);
+        // Total duration = 60 + 120 + 60 = 240s; listened = 60 + 0 + 30 = 90s => 37.5% -> 38%
+        check(onlineProg!=null && onlineProg.optInt("playedTracks")==2 && onlineProg.optInt("totalTracks")==3,"Online work progress counts played tracks across nested folders");
+        check(onlineProg.optInt("percent")==38,"Online work progress computes duration-weighted percentage");
+        String t1Badge=TrackResume.buildTrackBadge(c,t1,77L,false,onlineLast);
+        String t3Badge=TrackResume.buildTrackBadge(c,t3,77L,true,onlineLast);
+        check(t1Badge.contains("100%"),"Completed track shows 100% badge even though resume seek restarts at zero");
+        check(t3Badge.contains("00:30") && t3Badge.contains("50%"),"Last played track badge shows clock and percentage");
+
+        // 2. Local folder last-played + nested subfolder isolation + whole-work progress
+        String srcUri="content://provider/tree/primary%3AVoice";
+        String workAPath="Voice/RJ01544069";
+        String subA1Uri="content://provider/document/primary%3AVoice%2FRJ01544069%2F01_wav";
+        String subB1Uri="content://provider/document/primary%3AVoice%2FRJ01599999";
+        JSONObject locTrack1=new JSONObject().put("local_import",true).put("title","track1.wav")
+                .put("workTitle",workAPath+"/01_wav").put("local_source",srcUri).put("local_parent",subA1Uri)
+                .put("mediaStreamUrl","content://provider/document/primary%3AVoice%2FRJ01544069%2F01_wav%2Ftrack1.wav");
+        JSONObject locTrack2=new JSONObject().put("local_import",true).put("title","track2.wav")
+                .put("workTitle",workAPath+"/02_mp3").put("local_source",srcUri).put("local_parent","content://provider/document/primary%3AVoice%2FRJ01544069%2F02_mp3")
+                .put("mediaStreamUrl","content://provider/document/primary%3AVoice%2FRJ01544069%2F02_mp3%2Ftrack2.wav");
+        TrackResume.remember(c,locTrack1,45000,90000); // 50%
+
+        JSONArray roots=new JSONArray().put(new JSONObject().put("uri",srcUri).put("name","Voice")
+                .put("entries",new JSONArray()
+                        .put(new JSONObject().put("directory",false).put("name","track1.wav").put("path",workAPath+"/01_wav/track1.wav")
+                                .put("parent",subA1Uri).put("uri",locTrack1.getString("mediaStreamUrl")))
+                        .put(new JSONObject().put("directory",false).put("name","track2.wav").put("path",workAPath+"/02_mp3/track2.wav")
+                                .put("parent","content://provider/document/primary%3AVoice%2FRJ01544069%2F02_mp3").put("uri",locTrack2.getString("mediaStreamUrl")))));
+
+        JSONObject localWorkLast=TrackResume.lastPlayedForLocalFolder(c,srcUri,workAPath,"content://provider/document/primary%3AVoice%2FRJ01544069");
+        check(localWorkLast!=null && "track1.wav".equals(localWorkLast.optString("title")),"Local parent folder resolves descendant last-played track");
+        check("01_wav".equals(localWorkLast.optString("subFolder")),"Local parent folder computes relative subfolder name");
+        check(TrackResume.lastPlayedForLocalFolder(c,srcUri,"Voice/RJ01599999",subB1Uri)==null,"Sibling local work does not see Work A last-played track");
+        JSONObject localProg=TrackResume.workProgressLocal(c,roots,srcUri,workAPath,"content://provider/document/primary%3AVoice%2FRJ01544069");
+        check(localProg!=null && localProg.optInt("playedTracks")==1 && localProg.optInt("totalTracks")==2 && localProg.optInt("percent")==25,"Local work progress averages track completion across subfolders");
+
+        // 3. Baidu Cloud folder last-played + folder progress
+        JSONObject cloudTrack=new JSONObject().put("baidu_cloud",true).put("cloud_owner","100123").put("cloud_id","99881")
+                .put("cloud_folder","/ASMR/RJ01/01_wav").put("title","c1.flac");
+        TrackResume.remember(c,cloudTrack,120000,240000);
+        JSONObject cloudParentLast=TrackResume.lastPlayedForCloudFolder(c,"100123","/ASMR/RJ01");
+        check(cloudParentLast!=null && "c1.flac".equals(cloudParentLast.optString("title")) && "01_wav".equals(cloudParentLast.optString("subFolder")),"Baidu Cloud parent folder detects descendant last-played track");
+        check(TrackResume.lastPlayedForCloudFolder(c,"999999","/ASMR/RJ01")==null,"Different cloud account keeps separate history");
+        List<JSONObject> cloudVisible=Arrays.asList(
+                new JSONObject().put("isdir",0).put("fs_id","99881").put("server_filename","c1.flac"),
+                new JSONObject().put("isdir",0).put("fs_id","99882").put("server_filename","c2.flac"));
+        JSONObject cloudProg=TrackResume.folderProgressCloud(c,"100123",cloudVisible);
+        check(cloudProg!=null && cloudProg.optInt("playedTracks")==1 && cloudProg.optInt("totalTracks")==2 && cloudProg.optInt("percent")==25,"Cloud directory calculates current folder progress");
+
+        // 4. Formatting + option gate + bounded work_last_tracks
+        check("01:05".equals(TrackResume.formatDurationClock(65000)) && "1:01:05".equals(TrackResume.formatDurationClock(3665000)),"Duration clock formats mm:ss and h:mm:ss");
+        check("\u521a\u521a".equals(TrackResume.formatRelativeTime(100000L,130000L)) && "2\u5929\u524d".equals(TrackResume.formatRelativeTime(1000L,1000L+2L*86400_000L)),"Relative time formats recent and day offsets");
+        PlaybackOptions.enabled(c,false);
+        check(TrackResume.lastPlayedForOnlineWork(c,77L)==null && TrackResume.trackProgress(c,t1,77L)==null,"Disabling remember option hides last-played & percentages");
+        PlaybackOptions.enabled(c,true);
+        check(TrackResume.lastPlayedForOnlineWork(c,77L)!=null,"Re-enabling remember option restores last-played visibility");
+
+        Context bounded=context("work-last-bounded");
+        for(int i=1;i<=501;i++) {
+            TrackResume.remember(bounded,new JSONObject().put("workId",i).put("hash",i+"/0").put("title","t"+i),5000,10000);
+        }
+        check(bounded.getSharedPreferences("work_last_tracks",0).getAll().size()==500,"Work last-played storage is bounded to 500 works");
+    }
     public static void main(String[] args) throws Exception {
         Field field=PlaybackPosition.class.getDeclaredField("IO"); field.setAccessible(true);
         ExecutorService io=(ExecutorService)field.get(null);
         try {
-            bookmarks(); playback(); favorites();
+            bookmarks(); playback(); favorites(); workLastPlayedAndProgress();
             io.submit(()->{}).get(5,TimeUnit.SECONDS);
             System.out.println("PASS: "+checks+" per-track resume and independent local favorites checks");
         } finally { io.shutdown(); io.awaitTermination(5,TimeUnit.SECONDS); }

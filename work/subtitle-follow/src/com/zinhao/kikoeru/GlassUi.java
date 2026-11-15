@@ -2399,6 +2399,7 @@ public final class GlassUi {
             line.setPadding(0, dp(context, 3), 0, dp(context, 3));
             infoList.addView(line, new LinearLayout.LayoutParams(-1, -2));
         }
+        infoList.addView(buildLastPlayedBanner(context));
         root.addView(infoList, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout netBox = new LinearLayout(context);
@@ -2457,6 +2458,16 @@ public final class GlassUi {
             String sourceLabel, String displayPath, int trackCount, boolean localHasLyric,
             boolean isFavorite, int cardColor, Runnable onToggleFavorite, Runnable onUpload,
             Runnable onPlayAll, Runnable onMetaResolved) {
+        return bindWorkDetailHeader(context, root, rawName, sourceLabel, displayPath, trackCount,
+                localHasLyric, isFavorite, cardColor, onToggleFavorite, onUpload, onPlayAll,
+                onMetaResolved, null, null, null);
+    }
+
+    public static ImageView bindWorkDetailHeader(Context context, LinearLayout root, String rawName,
+            String sourceLabel, String displayPath, int trackCount, boolean localHasLyric,
+            boolean isFavorite, int cardColor, Runnable onToggleFavorite, Runnable onUpload,
+            Runnable onPlayAll, Runnable onMetaResolved, org.json.JSONObject lastPlayed,
+            org.json.JSONObject workProgress, Runnable onResumeLastTrack) {
         boolean light = ThemePalettes.light(cardColor);
         int ink = ThemePalettes.text(cardColor);
         int muted = ThemePalettes.secondary(cardColor);
@@ -2641,7 +2652,198 @@ public final class GlassUi {
         }
 
         filesHeader.setTextColor(ink);
+        bindLastPlayedBanner(context, root, lastPlayed, workProgress, cardColor, "", onResumeLastTrack);
         return cover;
+    }
+
+    private static LinearLayout buildLastPlayedBanner(Context context) {
+        LinearLayout card = new LinearLayout(context);
+        card.setTag("rj_last_played_banner");
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = dp(context, 10);
+        card.setLayoutParams(lp);
+        card.setVisibility(View.GONE);
+
+        LinearLayout topRow = new LinearLayout(context);
+        topRow.setOrientation(LinearLayout.HORIZONTAL);
+        topRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView badgeLabel = new TextView(context);
+        badgeLabel.setTextSize(12.5f);
+        badgeLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        topRow.addView(badgeLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView actionLabel = new TextView(context);
+        actionLabel.setTextSize(12.5f);
+        actionLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        actionLabel.setText("\u4e00\u952e\u7eed\u542c \u25b6");
+        topRow.addView(actionLabel, new LinearLayout.LayoutParams(-2, -2));
+        card.addView(topRow, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView trackLine = new TextView(context);
+        trackLine.setTextSize(14f);
+        trackLine.setTypeface(Typeface.DEFAULT_BOLD);
+        trackLine.setMaxLines(2);
+        trackLine.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams trackLp = new LinearLayout.LayoutParams(-1, -2);
+        trackLp.topMargin = dp(context, 4);
+        card.addView(trackLine, trackLp);
+
+        TextView detailLine = new TextView(context);
+        detailLine.setTextSize(12.5f);
+        LinearLayout.LayoutParams detailLp = new LinearLayout.LayoutParams(-1, -2);
+        detailLp.topMargin = dp(context, 2);
+        card.addView(detailLine, detailLp);
+
+        LinearLayout barTrack = new LinearLayout(context);
+        barTrack.setOrientation(LinearLayout.HORIZONTAL);
+        barTrack.setWeightSum(100f);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(-1, dp(context, 5));
+        barLp.topMargin = dp(context, 8);
+        card.addView(barTrack, barLp);
+        View fill = new View(context);
+        View spacer = new View(context);
+        barTrack.addView(fill, new LinearLayout.LayoutParams(0, -1, 0f));
+        barTrack.addView(spacer, new LinearLayout.LayoutParams(0, -1, 100f));
+
+        TextView overallLine = new TextView(context);
+        overallLine.setTextSize(12f);
+        LinearLayout.LayoutParams overallLp = new LinearLayout.LayoutParams(-1, -2);
+        overallLp.topMargin = dp(context, 4);
+        card.addView(overallLine, overallLp);
+
+        return card;
+    }
+
+    public static void bindLastPlayedBanner(Context context, LinearLayout root, org.json.JSONObject lastPlayed,
+            org.json.JSONObject workProgress, int cardColor, String fallbackSubFolder, Runnable onResumeClick) {
+        if (root == null) return;
+        View raw = root.findViewWithTag("rj_last_played_banner");
+        if (!(raw instanceof LinearLayout)) return;
+        LinearLayout card = (LinearLayout) raw;
+        int played = workProgress != null ? workProgress.optInt("playedTracks", 0) : 0;
+        if (lastPlayed == null && played <= 0) {
+            card.setVisibility(View.GONE);
+            card.setOnClickListener(null);
+            return;
+        }
+        card.setVisibility(View.VISIBLE);
+        boolean light = ThemePalettes.light(cardColor);
+        int ink = ThemePalettes.text(cardColor);
+        int muted = ThemePalettes.secondary(cardColor);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(context, 12));
+        bg.setColor(light ? 0x16fa2d48 : 0x20fa2d48);
+        bg.setStroke(Math.max(1, dp(context, 0.9f)), 0x52fa2d48);
+        card.setBackground(bg);
+
+        LinearLayout topRow = (LinearLayout) card.getChildAt(0);
+        TextView badgeLabel = (TextView) topRow.getChildAt(0);
+        TextView actionLabel = (TextView) topRow.getChildAt(1);
+        TextView trackLine = (TextView) card.getChildAt(1);
+        TextView detailLine = (TextView) card.getChildAt(2);
+        LinearLayout barTrack = (LinearLayout) card.getChildAt(3);
+        View fill = barTrack.getChildAt(0);
+        View spacer = barTrack.getChildAt(1);
+        TextView overallLine = (TextView) card.getChildAt(4);
+
+        badgeLabel.setTextColor(RED);
+        actionLabel.setTextColor(RED);
+        trackLine.setTextColor(ink);
+        detailLine.setTextColor(muted);
+        overallLine.setTextColor(muted);
+
+        if (lastPlayed != null) {
+            String rel = TrackResume.formatRelativeTime(lastPlayed.optLong("time", 0L), System.currentTimeMillis());
+            badgeLabel.setText(rel.isEmpty() ? "\u4e0a\u6b21\u542c\u5230" : "\u4e0a\u6b21\u542c\u5230 \u00b7 " + rel);
+            String sub = lastPlayed.optString("subFolder");
+            if (sub.isEmpty() && fallbackSubFolder != null) sub = fallbackSubFolder;
+            String title = lastPlayed.optString("title");
+            trackLine.setText(!sub.isEmpty() ? sub + " / " + title : title);
+            trackLine.setVisibility(View.VISIBLE);
+
+            long seek = lastPlayed.optLong("seek", 0L);
+            long dur = lastPlayed.optLong("duration", 0L);
+            boolean done = lastPlayed.optBoolean("completed", false);
+            int tPct = lastPlayed.optInt("percent", -1);
+            String detail;
+            if (done) {
+                detail = "\u672c\u9996\u5df2\u542c\u5b8c (100%)";
+            } else if (seek > 0L && dur > 0L) {
+                detail = TrackResume.formatDurationClock(seek) + " / " + TrackResume.formatDurationClock(dur)
+                        + (tPct > 0 ? " \u00b7 \u672c\u9996\u5df2\u542c " + tPct + "%" : "");
+            } else if (seek > 0L) {
+                detail = "\u5df2\u542c\u81f3 " + TrackResume.formatDurationClock(seek);
+            } else {
+                detail = "\u4e0a\u6b21\u64ad\u653e\u8fc7\u6b64\u9996";
+            }
+            detailLine.setText(detail);
+            detailLine.setVisibility(View.VISIBLE);
+        } else {
+            badgeLabel.setText("\u64ad\u653e\u8fdb\u5ea6");
+            trackLine.setVisibility(View.GONE);
+            detailLine.setVisibility(View.GONE);
+        }
+
+        int barPct = -1;
+        String overallText = "";
+        int total = workProgress != null ? workProgress.optInt("totalTracks", 0) : 0;
+        if (workProgress != null && total > 0 && played > 0) {
+            barPct = Math.max(1, Math.min(100, workProgress.optInt("percent", 0)));
+            String scope = workProgress.optString("scopeLabel", "\u6574\u90e8\u8fdb\u5ea6");
+            overallText = scope + " " + barPct + "%\uff08\u5df2\u542c " + played + "/" + total + " \u9996\uff09";
+        } else if (lastPlayed != null && lastPlayed.optInt("percent", -1) > 0) {
+            barPct = Math.max(1, Math.min(100, lastPlayed.optInt("percent", 0)));
+            overallText = "\u672c\u9996\u8fdb\u5ea6 " + barPct + "%\uff08\u8fdb\u5165\u5b50\u76ee\u5f55\u53ef\u770b\u76ee\u5f55\u603b\u8fdb\u5ea6\uff09";
+        }
+
+        if (barPct > 0) {
+            barTrack.setVisibility(View.VISIBLE);
+            GradientDrawable trackBg = new GradientDrawable();
+            trackBg.setCornerRadius(dp(context, 2.5f));
+            trackBg.setColor(light ? 0x1c000000 : 0x26ffffff);
+            barTrack.setBackground(trackBg);
+            GradientDrawable fillBg = new GradientDrawable();
+            fillBg.setCornerRadius(dp(context, 2.5f));
+            fillBg.setColor(RED);
+            fill.setBackground(fillBg);
+            fill.setLayoutParams(new LinearLayout.LayoutParams(0, -1, (float) barPct));
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(0, -1, (float) Math.max(0, 100 - barPct)));
+            overallLine.setText(overallText);
+            overallLine.setVisibility(View.VISIBLE);
+        } else {
+            barTrack.setVisibility(View.GONE);
+            overallLine.setVisibility(View.GONE);
+        }
+
+        if (onResumeClick != null) {
+            actionLabel.setVisibility(View.VISIBLE);
+            attachIosPress(card, 0.985f);
+            card.setOnClickListener(v -> {
+                hapticTick(v);
+                onResumeClick.run();
+            });
+        } else {
+            actionLabel.setVisibility(View.GONE);
+            card.setOnClickListener(null);
+            card.setOnTouchListener(null);
+        }
+    }
+
+    public static void setColoredSubtitle(TextView tv, String base, String badge, int baseColor, int badgeColor) {
+        if (tv == null) return;
+        if (badge == null || badge.isEmpty()) {
+            tv.setText(base);
+            tv.setTextColor(baseColor);
+            return;
+        }
+        String joined = (base == null || base.isEmpty()) ? badge : base + "   \u00b7   " + badge;
+        android.text.SpannableString span = new android.text.SpannableString(joined);
+        int start = joined.length() - badge.length();
+        span.setSpan(new android.text.style.ForegroundColorSpan(badgeColor), start, joined.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tv.setText(span);
+        tv.setTextColor(baseColor);
     }
 
     private static final class Api31 {

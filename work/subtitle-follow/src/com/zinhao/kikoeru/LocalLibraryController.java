@@ -28,6 +28,7 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
     private String source="",parent="";
     private String resumeUri="";
     private long resumeSeek;
+    private JSONObject currentLastPlayed,currentWorkProgress;
     private AudioService.CtrlBinder binder;
     private boolean bound, busy, loading=true,deleteEnabled,deleting,favoritesMode;
     private volatile boolean cancel;
@@ -301,11 +302,23 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
             LocalArt.show(getApplicationContext(),image,n.optString("cover"),
                     LocalIndex.artworkSources(n),placeholder);
             LinearLayout words=(LinearLayout)row.getChildAt(1);
-            ((TextView)words.getChildAt(0)).setText(n.optString("name"));
+            TextView titleView=(TextView)words.getChildAt(0);
+            TextView descView=(TextView)words.getChildAt(1);
+            titleView.setText(n.optString("name"));
+            boolean isLastDir=dir && isLocalFolderLastPlayed(n,currentLastPlayed);
+            boolean isLastTrack=!dir && isLocalTrackLastPlayed(n,currentLastPlayed);
+            titleView.setTextColor(isLastDir || isLastTrack?GlassUi.RED:ThemePalettes.text(card));
             String desc=dir?n.optInt("count")+" \u9996\u97f3\u8f68"+(n.optBoolean("lyric")?"  \ud83d\udcac \u6b4c\u8bcd":""):LocalIndex.extension(n.optString("name")).toUpperCase(Locale.ROOT)
                     +String.format(Locale.ROOT,"  %.1f MB",n.optLong("size")/1048576.0)+(n.optString("subtitle").isEmpty()?"":"  \ud83d\udcac \u6b4c\u8bcd");
             if(!search.getText().toString().trim().isEmpty()) desc=n.optString("path");
-            ((TextView)words.getChildAt(1)).setText(desc);
+            String badge="";
+            if(isLastDir) {
+                badge="\u4e0a\u6b21\u542c\u5230\u6b64\u76ee\u5f55 \u00b7 "+currentLastPlayed.optString("title");
+            } else if(!dir) {
+                badge=TrackResume.buildTrackBadge(LocalLibraryController.this,TrackResume.localTrackStub(n),0L,isLastTrack,currentLastPlayed);
+            }
+            GlassUi.setColoredSubtitle(descView,desc,badge,ThemePalettes.secondary(card),
+                    isLastDir || isLastTrack?GlassUi.RED:ThemePalettes.accent(card));
             return row;
         }
     };
@@ -398,19 +411,29 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
                 final JSONObject playTarget=firstAudio;
                 String localCoverOrigin=!targetDir.optString("cover").isEmpty()?"\u81ea\u5df1\u7684\u6587\u4ef6 \u00b7 \u672c\u5730\u72ec\u7acb\u5c01\u9762\u56fe"
                         :(LocalIndex.artworkSources(targetDir).length()>0?"\u81ea\u5df1\u7684\u6587\u4ef6 \u00b7 \u672c\u5730\u97f3\u9891\u5185\u5d4c\u5c01\u9762":"\u6682\u65e0\u672c\u5730\u5c01\u9762");
+                String curPath=targetDir.optString("path",title);
+                currentLastPlayed=TrackResume.lastPlayedForLocalFolder(this,source,curPath,parent);
+                currentWorkProgress=TrackResume.workProgressLocal(this,roots,source,curPath,parent);
+                final JSONObject resumeTarget=currentLastPlayed;
                 ImageView headerCover=GlassUi.bindWorkDetailHeader(this,detailHeader,
                         targetDir.optString("name",title),root.optString("name","\u672c\u5730")+"||"+localCoverOrigin,
-                        targetDir.optString("path",title),targetDir.optInt("count",visible.size()),
+                        curPath,targetDir.optInt("count",visible.size()),
                         targetDir.optBoolean("lyric"),LocalFavorites.contains(this,targetDir),card,
                         ()->{ boolean added=LocalFavorites.toggle(this,targetDir); refreshRows();
                             GlassUi.toast(this,added?"\u5df2\u52a0\u5165\u672c\u5730\u6536\u85cf":"\u5df2\u53d6\u6d88\u672c\u5730\u6536\u85cf"); },
                         ()->prepareUpload(targetDir),
                         playTarget!=null?()->open(playTarget):null,
-                        ()->{ if(!isFinishing() && !isDestroyed()) refreshRows(); });
+                        ()->{ if(!isFinishing() && !isDestroyed()) refreshRows(); },
+                        currentLastPlayed,
+                        currentWorkProgress,
+                        resumeTarget!=null?()->resumeLocalLastPlayed(resumeTarget):null);
                 LocalArt.show(getApplicationContext(),headerCover,targetDir.optString("cover"),
                         LocalIndex.artworkSources(targetDir),icon("ic_baseline_album_24",android.R.drawable.ic_menu_gallery));
             } else if(detailHeader!=null) {
+                currentLastPlayed=null; currentWorkProgress=null;
                 detailHeader.setVisibility(View.GONE);
+            } else {
+                currentLastPlayed=null; currentWorkProgress=null;
             }
             list.setVisibility(albums?View.GONE:View.VISIBLE); grid.setVisibility(albums?View.VISIBLE:View.GONE);
             empty.setVisibility(visible.isEmpty()?View.VISIBLE:View.GONE);
@@ -799,7 +822,60 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
         state.putString("resume_uri",resumeUri); state.putLong("resume_seek",resumeSeek);
         state.putString("source",source); state.putString("parent",parent); state.putString("query",search.getText().toString());
     }
-    void onStart() { if(mini!=null) mini.active(true); }
+    void onStart() { if(mini!=null) mini.active(true); if(list!=null && !loading && !busy) refreshRows(); }
+
+    private static boolean isLocalFolderLastPlayed(JSONObject folderNode,JSONObject last) {
+        if(folderNode==null || last==null) return false;
+        String folderUri=folderNode.optString("uri");
+        String lastParent=last.optString("localParent");
+        if(!lastParent.isEmpty()) {
+            try { if(lastParent.equals(LocalDeletion.key(folderUri))) return true; }
+            catch(Exception ignored) { if(lastParent.equals(folderUri)) return true; }
+        }
+        String folderPath=folderNode.optString("path").trim();
+        String lastPath=last.optString("folderPath").trim();
+        return !folderPath.isEmpty() && (lastPath.equals(folderPath) || lastPath.startsWith(folderPath+"/"));
+    }
+
+    private static boolean isLocalTrackLastPlayed(JSONObject trackNode,JSONObject last) {
+        if(trackNode==null || last==null) return false;
+        String rawUri=trackNode.optString("uri");
+        if(rawUri.equals(last.optString("rawUri"))) return true;
+        String lastKey=last.optString("uri");
+        if(!lastKey.isEmpty()) {
+            try { if(lastKey.equals(LocalDeletion.key(rawUri))) return true; }
+            catch(Exception ignored) {}
+        }
+        return false;
+    }
+
+    private void resumeLocalLastPlayed(JSONObject last) {
+        if(last==null || roots==null) return;
+        JSONObject match=null;
+        String matchSource="";
+        for(int i=0;i<roots.length() && match==null;i++) {
+            JSONObject r=roots.optJSONObject(i); if(r==null) continue;
+            JSONArray entries=r.optJSONArray("entries"); if(entries==null) continue;
+            for(int j=0;j<entries.length();j++) {
+                JSONObject n=entries.optJSONObject(j);
+                if(n!=null && !n.optBoolean("directory") && isLocalTrackLastPlayed(n,last)) {
+                    match=new JSONObject();
+                    try { match=new JSONObject(n.toString()).put("source",r.optString("uri")); } catch(Exception ignored) {}
+                    matchSource=r.optString("uri");
+                    break;
+                }
+            }
+        }
+        if(match==null) { GlassUi.toast(this,"\u672a\u627e\u5230\u4e0a\u6b21\u64ad\u653e\u7684\u672c\u5730\u97f3\u8f68"); return; }
+        String targetParent=match.optString("parent");
+        if(!matchSource.equals(source) || !targetParent.equals(parent)) {
+            source=matchSource;
+            parent=targetParent;
+            search.setText("");
+            refreshRows();
+        }
+        open(match);
+    }
     void onStop() { if(mini!=null) mini.active(false); }
     void onDestroy() { cancel=true; main.removeCallbacks(filter); if(mini!=null) mini.dispose(); if(bound) unbindService(this); }
     public void onServiceConnected(ComponentName name,IBinder service) { binder=(AudioService.CtrlBinder)service; if(mini!=null) mini.attach(binder); }

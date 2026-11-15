@@ -25,7 +25,8 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
     private JSONObject session=new JSONObject(),device;
     private JSONArray entries=new JSONArray();
     private final List<JSONObject> visible=new ArrayList<>();
-    private String owner="",path="",rootPath="";
+    private String owner="",path="",rootPath="",pendingResumeCloudId="";
+    private JSONObject currentLastPlayed;
     private int page,card,bar,next,loadGeneration,authGeneration,paletteIndex;
     private boolean loading,bound,favorites,more,authorizing,liquidState;
     private TextView title,status,empty;
@@ -274,15 +275,24 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
             for(JSONObject r:visible) if(r.optInt("isdir")==0) { firstTrack=r; break; }
             final JSONObject playFirst=firstTrack;
             String cloudCoverOrigin=BaiduCloud.coverSourceLabel(this,owner,path);
+            currentLastPlayed=TrackResume.lastPlayedForCloudFolder(this,owner,path);
+            JSONObject folderProgress=TrackResume.folderProgressCloud(this,owner,visible);
+            final JSONObject resumeTarget=currentLastPlayed;
             ImageView headerCover=GlassUi.bindWorkDetailHeader(this,detailHeader,folderTitle,"\u767e\u5ea6\u7f51\u76d8||"+cloudCoverOrigin,
                     path,audioCount,hasSub,isCloudFavorite(path),card,
                     ()->{ try { favorite(new JSONObject().put("fs_id","0").put("path",currentPath).put("server_filename",folderTitle).put("isdir",1)); rows(); } catch(Exception ignored) {} },
                     null,
                     playFirst!=null?()->open(playFirst):null,
-                    ()->{ if(!isFinishing() && !isDestroyed()) rows(); });
+                    ()->{ if(!isFinishing() && !isDestroyed()) rows(); },
+                    currentLastPlayed,
+                    folderProgress,
+                    resumeTarget!=null?()->resumeCloudLastPlayed(resumeTarget):null);
             BaiduCloud.showCover(getApplicationContext(),headerCover,owner,path,icon("ic_no_cover"));
         } else if(detailHeader!=null) {
+            currentLastPlayed=null;
             detailHeader.setVisibility(View.GONE);
+        } else {
+            currentLastPlayed=null;
         }
         boolean blank=visible.isEmpty() && !inSubfolder; ((View)empty.getTag()).setVisibility(blank?View.VISIBLE:View.GONE);
         boolean useList=inSubfolder || audio;
@@ -293,8 +303,16 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         if(navigation!=null) navigation.select(favorites?1:0,true);
         if(embedded) AppShell.panelSelection(host,2,favorites?1:0);
         updateDockSpacing(); albums.notifyDataSetChanged(); files.notifyDataSetChanged();
+        if(!pendingResumeCloudId.isEmpty() && !loading) {
+            String targetId=pendingResumeCloudId; pendingResumeCloudId="";
+            for(JSONObject r:visible) if(r.optInt("isdir")==0 && targetId.equals(r.optString("fs_id"))) {
+                main.post(()-> { if(!isFinishing() && !isDestroyed()) open(r); });
+                break;
+            }
+        }
     }
     private void error(Exception error) {
+        pendingResumeCloudId="";
         String message=BaiduCloud.message(error); status.setText(message); empty.setText(message); action.setVisibility(View.VISIBLE);
         Toast.makeText(this,message,Toast.LENGTH_LONG).show();
     }
@@ -354,11 +372,23 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
             JSONObject item=visible.get(i); boolean directory=item.optInt("isdir")==1; ImageView image=(ImageView)row.getChildAt(0);
             BaiduCloud.showCover(getApplicationContext(),image,owner,directory?item.optString("path"):path,icon(directory?"ic_baseline_folder_24":"ic_baseline_audiotrack_24"));
             LinearLayout words=(LinearLayout)row.getChildAt(1);
+            TextView titleView=(TextView)words.getChildAt(0);
+            TextView descView=(TextView)words.getChildAt(1);
             String fileName=item.optString("server_filename");
-            ((TextView)words.getChildAt(0)).setText(fileName);
+            boolean isLastDir=directory && isCloudFolderLastPlayed(item.optString("path"),currentLastPlayed);
+            boolean isLastTrack=!directory && currentLastPlayed!=null && item.optString("fs_id").equals(currentLastPlayed.optString("cloudId"));
+            titleView.setText(fileName);
+            titleView.setTextColor(isLastDir || isLastTrack?GlassUi.RED:ink());
             boolean trackSub=!directory && hasCloudSubtitleFor(fileName);
-            ((TextView)words.getChildAt(1)).setText(directory?"\u6587\u4ef6\u5939":LocalIndex.extension(fileName).toUpperCase(Locale.ROOT)
-                    +String.format(Locale.ROOT,"  %.1f MB",item.optLong("size")/1048576.0)+(trackSub?"  \ud83d\udcac \u6b4c\u8bcd":""));
+            String desc=directory?"\u6587\u4ef6\u5939":LocalIndex.extension(fileName).toUpperCase(Locale.ROOT)
+                    +String.format(Locale.ROOT,"  %.1f MB",item.optLong("size")/1048576.0)+(trackSub?"  \ud83d\udcac \u6b4c\u8bcd":"");
+            String badge="";
+            if(isLastDir) {
+                badge="\u4e0a\u6b21\u542c\u5230\u6b64\u76ee\u5f55 \u00b7 "+currentLastPlayed.optString("title");
+            } else if(!directory) {
+                badge=TrackResume.buildTrackBadge(BaiduCloudController.this,TrackResume.cloudTrackStub(owner,item),0L,isLastTrack,currentLastPlayed);
+            }
+            GlassUi.setColoredSubtitle(descView,desc,badge,muted(),isLastDir || isLastTrack?GlassUi.RED:accent());
             return row;
         }
     };
@@ -581,7 +611,28 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         else if(!rootPath.isEmpty()) load(rootPath,false);
         else { favorites=false; rows(); }
     }
-    void onStart() { if(mini!=null) mini.active(true); }
+    void onStart() { if(mini!=null) mini.active(true); if(list!=null && !loading && !owner.isEmpty() && !rootPath.isEmpty()) rows(); }
+
+    private static boolean isCloudFolderLastPlayed(String folderPath,JSONObject last) {
+        if(folderPath==null || folderPath.isEmpty() || last==null) return false;
+        String target=last.optString("folder");
+        return target.equals(folderPath) || target.startsWith(folderPath+"/");
+    }
+
+    private void resumeCloudLastPlayed(JSONObject last) {
+        if(last==null) return;
+        String targetFolder=last.optString("folder"),cloudId=last.optString("cloudId");
+        if(targetFolder.isEmpty() || cloudId.isEmpty()) return;
+        if(targetFolder.equals(path)) {
+            for(JSONObject r:visible) if(r.optInt("isdir")==0 && cloudId.equals(r.optString("fs_id"))) {
+                open(r); return;
+            }
+            GlassUi.toast(this,"\u672a\u627e\u5230\u4e0a\u6b21\u64ad\u653e\u7684\u4e91\u7aef\u97f3\u8f68");
+            return;
+        }
+        pendingResumeCloudId=cloudId;
+        load(targetFolder,false);
+    }
     void onStop() { if(mini!=null) mini.active(false); }
     void onDestroy() {
         ++loadGeneration; ++authGeneration; main.removeCallbacksAndMessages(null); JSONObject pending=device;
