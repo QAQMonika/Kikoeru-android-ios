@@ -1,6 +1,14 @@
-# Kikoeru Android 魔改增强版
+<p align="center">
+  <img src="docs/images/banner.jpg" alt="Kikoeru Enhanced Banner" width="100%" />
+</p>
 
-基于 [Zinhao/Kikoeru-android](https://github.com/Zinhao/Kikoeru-android)（**GPL-3.0**）二次开发，安装包请到 [Releases](https://github.com/QAQMonika/Kikoeru-android-ios/releases) 下载。
+<h1 align="center">Kikoeru Android 魔改增强版</h1>
+
+<p align="center">
+  基于 <a href="https://github.com/Zinhao/Kikoeru-android">Zinhao/Kikoeru-android</a>（GPL-3.0）二次开发 · 安装包前往 <a href="https://github.com/QAQMonika/Kikoeru-android-ios/releases">Releases 下载</a>
+</p>
+
+---
 
 ## 主要改动
 
@@ -12,6 +20,10 @@
 ---
 
 ## 百度网盘直连配置（必看）
+
+<p align="center">
+  <img src="docs/images/baidu-flow.jpg" alt="百度网盘直连三步配置流程" width="92%" />
+</p>
 
 > 凭据用本机 AndroidKeyStore 加密保存，不经过任何第三方服务器，安装包也不含预设密钥，需自备个人开放平台密钥。
 
