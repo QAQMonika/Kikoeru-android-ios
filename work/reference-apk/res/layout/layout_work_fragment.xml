@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout android:background="#10131A" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <androidx.recyclerview.widget.RecyclerView android:scrollbarSize="6.0dip" android:id="@id/recyclerView" android:scrollbars="vertical" android:clipToPadding="false" android:padding="8.0dip" android:layout_width="fill_parent" android:layout_height="fill_parent" android:fadeScrollbars="true" />
+    <TextView android:textSize="26.0sp" android:textColor="#E9EDF6" android:gravity="center" android:id="@id/text" android:layout_width="fill_parent" android:layout_height="fill_parent" android:text="content" />
+</FrameLayout>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Kikoeru.BottomDock" parent="@style/Theme.Kikoeru">
+        <item name="android:navigationBarColor">#24212D</item>
+        <item name="android:navigationBarDividerColor">#24212D</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+</resources>

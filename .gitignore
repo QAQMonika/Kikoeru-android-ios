@@ -1,0 +1,38 @@
+# Local agent / IDE workspace state
+.agents/
+.codex/
+.codex-remote-attachments/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Built APKs & intermediates (publish APKs via GitHub Releases)
+outputs/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+*.log
+
+# Toolchains, SDKs, archives, signing keys & scratch directories
+work/android-sdk/
+work/cmdline-tools-extract/
+work/backups/
+work/Kikoeru-android/
+work/KikoFlu/
+work/kikoflu-apk/
+work/*-check/
+work/*.jar
+work/*.zip
+work/*.png
+work/*.xml
+*.keystore
+*.jks
+
+# Generated build artifacts
+work/subtitle-follow/build/
+work/reference-apk/build/
+work/reference-apk/dist/
+work/reference-apk/smali_classes3/

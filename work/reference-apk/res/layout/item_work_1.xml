@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="horizontal" android:background="@drawable/card_bg_work" android:padding="8.0dip" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginTop="6.0dip" android:layout_marginBottom="2.0dip" android:layout_marginStart="6.0dip" android:layout_marginEnd="6.0dip" android:elevation="10.0dip"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <ImageView android:id="@id/ivCover" android:layout_width="90.0dip" android:layout_height="90.0dip" android:layout_marginTop="0.0dip" android:layout_marginBottom="0.0dip" android:src="@drawable/ic_no_cover" android:layout_centerVertical="true" android:layout_marginStart="0.0dip" android:layout_marginEnd="0.0dip" android:transitionName="hero_image" />
+    <LinearLayout android:orientation="vertical" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginStart="5.0dip">
+        <TextView android:id="@id/tvTitle" android:layout_width="fill_parent" android:layout_height="20.0dip" android:layout_marginTop="2.0dip" android:text="@string/local_works" android:layout_alignTop="@id/ivCover" android:fontFamily="sans-serif-medium" android:layout_marginStart="8.0dip" android:layout_toEndOf="@id/ivCover" />
+        <com.zinhao.kikoeru.TagsView android:id="@id/tvTags" android:visibility="gone" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginTop="0.0dip" android:layout_marginStart="0.0dip" app:tagBackground="@drawable/card_bg_tag" app:tags="健全 纯爱 校园 健全 纯爱 校园 健全 纯爱 校园" />
+        <com.zinhao.kikoeru.TagsView android:id="@id/tvCircles" android:padding="4.0dip" android:visibility="visible" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginTop="4.0dip" android:layout_marginStart="0.0dip" android:layout_marginEnd="10.0dip" app:tagBackground="@drawable/card_bg_circles" app:tags="com" />
+        <com.zinhao.kikoeru.TagsView android:id="@id/tvComArt" android:layout_width="fill_parent" android:layout_height="wrap_content" android:layout_marginTop="4.0dip" android:layout_marginStart="0.0dip" app:tagBackground="@drawable/card_bg_va" app:tags="こやまはる kikoeru" />
+    </LinearLayout>
+</LinearLayout>

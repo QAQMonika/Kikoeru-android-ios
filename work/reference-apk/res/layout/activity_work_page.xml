@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout android:orientation="vertical" android:background="#10131A" android:layout_width="fill_parent" android:layout_height="fill_parent"
+  xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
+    <com.google.android.material.appbar.AppBarLayout android:id="@id/appBarLayout" android:background="#10131A" android:layout_width="fill_parent" android:layout_height="wrap_content">
+        <com.google.android.material.tabs.TabLayout android:id="@id/tabLayout" android:background="#10131A" android:paddingTop="0.0dip" android:layout_width="fill_parent" android:layout_height="wrap_content" android:paddingStart="16.0dip" app:tabGravity="start" app:tabIndicator="@drawable/card_bg_tab" app:tabIndicatorColor="#48699F" app:tabIndicatorFullWidth="true" app:tabIndicatorGravity="center" app:tabIndicatorHeight="35.0dip" app:tabMode="scrollable" app:tabPaddingEnd="10.0dip" app:tabPaddingStart="10.0dip" app:tabSelectedTextColor="@color/white" app:tabTextColor="#B9C1CF">
+            <com.google.android.material.tabs.TabItem android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/all_works" />
+            <com.google.android.material.tabs.TabItem android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/listening" />
+            <com.google.android.material.tabs.TabItem android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/listened" />
+        </com.google.android.material.tabs.TabLayout>
+    </com.google.android.material.appbar.AppBarLayout>
+    <androidx.viewpager2.widget.ViewPager2 android:id="@id/vp" android:layout_width="fill_parent" android:layout_height="fill_parent" />
+</LinearLayout>
