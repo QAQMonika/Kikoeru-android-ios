@@ -1,6 +1,22 @@
 ﻿## 当前成果与版本历史
 
-`outputs/Kikoeru_fix32_last_played_debug.apk`
+`outputs/Kikoeru_fix33_translate_sort_debug.apk`
+
+`fix33` 在保留 `fix32` 全部改造的基础上，新增浏览器式「一键翻译标题」与「本地 / 百度网盘作品排序」：
+
+- **零配置一键「译」标题翻译（`TitleTranslator` + `GlassUi` + `AppShell`）**：
+  - 内置免 Key 的 Microsoft Edge 免费网页翻译（支持批量 12 条/次）并以 Google 免费翻译接口自动兜底，译文持久化缓存在本地 `title_translations`（LRU 上限 2,000 条），同时纳入本地/网盘中文关键词搜索匹配。
+  - 本地与百度网盘顶栏新增 **「译」** 开关按钮（点一下自动翻译当前页 RJ 获取到的日文标题，再点切回原题）；在线 / 本地 / 百度网盘三端详情页均新增 **「译 翻译标题 / 显示原题」** 胶囊，译文置顶、下方小字保留日文原题。
+- **本地 & 百度网盘作品排序（`LocalDocuments` + `LocalIndex` + `BaiduApi` + `LocalLibraryController` + `BaiduCloudController`）**：
+  - 顶栏新增 SF 排序按钮（`↕`），支持 5 种排序并持久化记忆：**名称 A → Z**、**名称 Z → A**、**最新上传 / 修改**、**最早上传 / 修改**、**最近听过**。
+  - 百度网盘根目录排序直接透传服务端 `order=time&desc=1` 参数，即使目录作品超过 200 部也能把最新上传作品置顶至首页首位；进入具体作品目录后音轨仍保持自然播放顺序。
+  - 本地扫描新增读取文件/目录 `COLUMN_LAST_MODIFIED` 并向上聚合至父作品目录，便于按最新修改/导入顺序浏览。
+
+`fix33` SHA-256：`1A2FCBEEC0B1A1C181F64B4D8E9A938D6E94277A4CE34EFACA0FF1CA4AAAAA36`（已通过全部 1,728 项 JVM 单元/回归测试与 15 组 APK 字节码校验，并已通过 ADB 覆盖安装至手机）。
+
+---
+
+### 历史版本：`outputs/Kikoeru_fix32_last_played_debug.apk`
 
 `fix32` 在保留 `fix31` 全部改造的基础上，在 **在线作品 / 本地作品 / 百度网盘** 三端统一上线「作品上次听到哪一首 + 聆听百分比进度」功能：
 

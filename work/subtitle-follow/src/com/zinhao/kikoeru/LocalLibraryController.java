@@ -36,8 +36,9 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
     private EditText search;
     private ListView list;
     private GridView grid;
-    private TextView empty;
-    private ImageButton add,refresh,management,folderBack;
+    private TextView empty,translateBtn;
+    private ImageButton add,refresh,management,folderBack,sortBtn;
+    private int sortMode;
     private MiniPlayer mini;
     private LinearLayout dock,headerBar,detailHeader;
     private FrameLayout detailContainer;
@@ -68,6 +69,7 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
         if(state!=null) pendingWriteSource=state.getString("write_source","");
         favoritesMode=state!=null ? state.getBoolean("favorites",false)
                 : getIntent().getIntExtra(AppShell.EXTRA_TAB,0)==1;
+        sortMode=getSharedPreferences("local_library_prefs",0).getInt("sort_mode",LocalIndex.SORT_NAME_ASC);
         int n=ThemePalettes.selected(this); paletteIndex=n; liquidState=PlaybackOptions.liquidGlass(this);
         page=ThemePalettes.color(n,1); card=ThemePalettes.color(n,2); bar=ThemePalettes.color(n,3);
         build();
@@ -130,6 +132,12 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
         ImageButton searchButton=button("ic_baseline_search_24","\u641c\u7d22",android.R.drawable.ic_menu_search,v->toggleSearch());
         searchButton.setVisibility(View.GONE);
         header.addView(searchButton,new LinearLayout.LayoutParams(btnSize,barHeight));
+        translateBtn=GlassUi.makeToolbarTranslatePill(this,this::toggleTranslate);
+        LinearLayout.LayoutParams trLp=new LinearLayout.LayoutParams(dp(34),dp(28));
+        trLp.rightMargin=dp(2);
+        header.addView(translateBtn,trLp);
+        sortBtn=button("ic_baseline_sort_24","\u6392\u5e8f",android.R.drawable.ic_menu_sort_by_size,v->chooseSort());
+        header.addView(sortBtn,new LinearLayout.LayoutParams(btnSize,barHeight));
         add=button("ic_baseline_folder_24","\u5bfc\u5165\u6587\u4ef6\u5939",android.R.drawable.ic_menu_agenda,v->choose());
         add.setImageTintList(ColorStateList.valueOf(accent()));
         header.addView(add,new LinearLayout.LayoutParams(btnSize,barHeight));
@@ -222,8 +230,9 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
         heading.setTextColor(ThemePalettes.text(page)); status.setTextColor(ThemePalettes.secondary(page));
         empty.setTextColor(ThemePalettes.secondary(page)); search.setTextColor(ThemePalettes.text(page));
         search.setHintTextColor(ThemePalettes.secondary(page)); search.setBackground(GlassUi.searchFieldBackground(this,card));
-        for(ImageButton icon:new ImageButton[]{folderBack,refresh,management})
-            icon.setImageTintList(ColorStateList.valueOf(accent()));
+        for(ImageButton icon:new ImageButton[]{folderBack,sortBtn,refresh,management})
+            if(icon!=null) icon.setImageTintList(ColorStateList.valueOf(accent()));
+        GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
         add.setImageTintList(ColorStateList.valueOf(accent()));
         list.setAdapter(adapter); grid.setAdapter(albumAdapter);
         if(oldList!=null) list.onRestoreInstanceState(oldList);
@@ -393,6 +402,20 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
                 visible=source.isEmpty() && query.trim().isEmpty()?LocalIndex.albums(roots):LocalIndex.rows(roots,source,parent,query);
             }
             if(source.isEmpty() && favoritesMode) visible=LocalFavorites.albums(this,roots,query);
+            if(source.isEmpty() && !visible.isEmpty()) {
+                Map<String,Long> playedMap=null;
+                if(sortMode==LocalIndex.SORT_RECENT_PLAYED) {
+                    playedMap=new HashMap<>();
+                    for(JSONObject row:visible) {
+                        JSONObject lp=TrackResume.lastPlayedForLocalFolder(this,row.optString("source"),
+                                row.optString("path",row.optString("name")),row.optString("document",row.optString("uri")));
+                        if(lp!=null) playedMap.put(row.optString("uri"),lp.optLong("time",0L));
+                    }
+                }
+                LocalIndex.sortAlbums(visible,sortMode,playedMap);
+            }
+            if(sortBtn!=null) sortBtn.setVisibility(source.isEmpty()?View.VISIBLE:View.GONE);
+            GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
             heading.setText(title);
             heading.setVisibility(ShellState.embeddedTitleVisible(embedded,!source.isEmpty())?View.VISIBLE:View.GONE);
             folderBack.setVisibility(ShellState.folderBackVisible(embedded,!source.isEmpty())?View.VISIBLE:View.GONE);
@@ -875,6 +898,52 @@ public final class LocalLibraryController extends ContextWrapper implements Serv
             refreshRows();
         }
         open(match);
+    }
+
+    private void toggleTranslate() {
+        boolean on=TitleTranslator.toggle(this);
+        GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
+        if(on) {
+            List<String> titles=new ArrayList<>();
+            for(JSONObject row:visible) {
+                String raw=row.optString("name");
+                String stripped=GlassUi.stripRj(raw);
+                String t=stripped;
+                if(t.isEmpty()) {
+                    JSONObject meta=GlassUi.rjMeta(this,raw,null);
+                    if(meta!=null) t=meta.optString("title");
+                }
+                if(t.isEmpty()) t=raw;
+                if(TitleTranslator.needsTranslation(t) && TitleTranslator.cached(this,t).isEmpty()) titles.add(t);
+            }
+            if(!titles.isEmpty()) {
+                GlassUi.toast(this,"\u6b63\u5728\u7ffb\u8bd1\u6807\u9898\u2026");
+                TitleTranslator.translateBatch(this,titles,()-> { if(!isFinishing() && !isDestroyed()) refreshRows(); });
+            } else {
+                GlassUi.toast(this,"\u5df2\u5207\u6362\u4e3a\u4e2d\u6587\u6807\u9898");
+            }
+        } else {
+            GlassUi.toast(this,"\u5df2\u5207\u56de\u539f\u9898");
+        }
+        refreshRows();
+    }
+
+    private void chooseSort() {
+        if(busy || loading) return;
+        showDialog(dialog("\u6392\u5e8f\u65b9\u5f0f").setSingleChoiceItems(LocalIndex.SORT_LABELS,sortMode,(d,which)-> {
+            d.dismiss();
+            sortMode=which;
+            getSharedPreferences("local_library_prefs",0).edit().putInt("sort_mode",which).apply();
+            boolean hasMod=false;
+            for(JSONObject r:visible) if(r.optLong("modified",0L)>0L) { hasMod=true; break; }
+            refreshRows();
+            grid.setSelection(0); list.setSelection(0);
+            if((which==LocalIndex.SORT_TIME_DESC || which==LocalIndex.SORT_TIME_ASC) && !hasMod && !visible.isEmpty()) {
+                GlassUi.toast(this,"\u6392\u5e8f\uff1a"+LocalIndex.SORT_LABELS[which]+"\uff08\u91cd\u626b\u76ee\u5f55\u53ef\u540c\u6b65\u7cbe\u786e\u4fee\u6539\u65f6\u95f4\uff09");
+            } else {
+                GlassUi.toast(this,"\u6392\u5e8f\uff1a"+LocalIndex.SORT_LABELS[which]);
+            }
+        }));
     }
     void onStop() { if(mini!=null) mini.active(false); }
     void onDestroy() { cancel=true; main.removeCallbacks(filter); if(mini!=null) mini.dispose(); if(bound) unbindService(this); }

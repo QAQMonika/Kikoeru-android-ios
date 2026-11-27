@@ -1838,10 +1838,18 @@ public final class GlassUi {
         if (query == null || query.isEmpty()) return true;
         String q = query.toLowerCase(java.util.Locale.ROOT);
         if (rawName != null && rawName.toLowerCase(java.util.Locale.ROOT).contains(q)) return true;
+        String stripped = stripRj(rawName);
+        if (!stripped.isEmpty()) {
+            String tr = TitleTranslator.cached(context, stripped);
+            if (!tr.isEmpty() && tr.toLowerCase(java.util.Locale.ROOT).contains(q)) return true;
+        }
         org.json.JSONObject meta = rjMeta(context, rawName, null);
         if (meta == null) return false;
-        return meta.optString("title").toLowerCase(java.util.Locale.ROOT).contains(q)
-                || meta.optString("cv").toLowerCase(java.util.Locale.ROOT).contains(q)
+        String metaTitle = meta.optString("title");
+        if (metaTitle.toLowerCase(java.util.Locale.ROOT).contains(q)) return true;
+        String metaTr = TitleTranslator.cached(context, metaTitle);
+        if (!metaTr.isEmpty() && metaTr.toLowerCase(java.util.Locale.ROOT).contains(q)) return true;
+        return meta.optString("cv").toLowerCase(java.util.Locale.ROOT).contains(q)
                 || meta.optString("circle").toLowerCase(java.util.Locale.ROOT).contains(q);
     }
 
@@ -2256,8 +2264,11 @@ public final class GlassUi {
         } else {
             displayTitle = rawName;
         }
-        titleView.setText(displayTitle);
-        titleView.setTextColor(ink);
+        if (TitleTranslator.enabled(context) && TitleTranslator.needsTranslation(displayTitle)
+                && TitleTranslator.cached(context, displayTitle).isEmpty()) {
+            TitleTranslator.translateBatch(context, java.util.Collections.singletonList(displayTitle), onMetaResolved);
+        }
+        applyTranslatedTitle(context, titleView, displayTitle, ink, muted, false);
 
         String cv = meta != null ? meta.optString("cv") : "";
         if (cv.isEmpty() && meta != null && !meta.optString("circle").isEmpty()) {
@@ -2496,8 +2507,11 @@ public final class GlassUi {
         if (!stripped.isEmpty()) displayTitle = stripped;
         else if (meta != null && !meta.optString("title").isEmpty()) displayTitle = meta.optString("title");
         else displayTitle = rawName;
-        titleView.setText(displayTitle);
-        titleView.setTextColor(ink);
+        if (TitleTranslator.enabled(context) && TitleTranslator.needsTranslation(displayTitle)
+                && TitleTranslator.cached(context, displayTitle).isEmpty()) {
+            TitleTranslator.translateBatch(context, java.util.Collections.singletonList(displayTitle), onMetaResolved);
+        }
+        applyTranslatedTitle(context, titleView, displayTitle, ink, muted, true);
 
         actionWrap.removeAllViews();
         if (onToggleFavorite != null) {
@@ -2513,6 +2527,7 @@ public final class GlassUi {
             playChip.setOnClickListener(v -> { hapticTick(v); onPlayAll.run(); });
             actionWrap.addView(playChip);
         }
+        addTranslateTitleChip(context, actionWrap, displayTitle, chipBg, chipStroke, ink, onMetaResolved);
         if (!rj.isEmpty()) {
             final String rjCode = rj;
             TextView copyChip = makeChip(context, "# \u590d\u5236 " + rjCode,
@@ -2844,6 +2859,96 @@ public final class GlassUi {
                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         tv.setText(span);
         tv.setTextColor(baseColor);
+    }
+
+    public static void applyTranslatedTitle(Context context, TextView titleView, String originalTitle,
+            int ink, int muted, boolean showOriginalSecondLine) {
+        if (titleView == null) return;
+        String safe = originalTitle == null ? "" : originalTitle;
+        titleView.setTextColor(ink);
+        if (context != null && TitleTranslator.shouldShowTranslated(context, safe)) {
+            String tr = TitleTranslator.cached(context, safe);
+            if (!tr.isEmpty() && !tr.equals(safe)) {
+                if (showOriginalSecondLine) {
+                    String combined = tr + "\n" + safe;
+                    android.text.SpannableString span = new android.text.SpannableString(combined);
+                    int origStart = tr.length() + 1;
+                    span.setSpan(new android.text.style.RelativeSizeSpan(0.74f), origStart, combined.length(),
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    span.setSpan(new android.text.style.ForegroundColorSpan(muted), origStart, combined.length(),
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    span.setSpan(new android.text.style.StyleSpan(Typeface.NORMAL), origStart, combined.length(),
+                            android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    titleView.setText(span);
+                } else {
+                    titleView.setText(tr);
+                }
+                return;
+            }
+        }
+        titleView.setText(safe);
+    }
+
+    public static void addTranslateTitleChip(Context context, WrapLayout actionWrap, String originalTitle,
+            int chipBg, int chipStroke, int ink, Runnable onChanged) {
+        if (context == null || actionWrap == null || !TitleTranslator.needsTranslation(originalTitle)) return;
+        final String target = originalTitle;
+        boolean hasCache = !TitleTranslator.cached(context, target).isEmpty();
+        boolean active = hasCache && TitleTranslator.shouldShowTranslated(context, target);
+        TextView chip = makeChip(context, active ? "\u8bd1 \u663e\u793a\u539f\u9898" : "\u8bd1 \u7ffb\u8bd1\u6807\u9898",
+                active ? 0x24fa2d48 : chipBg, active ? RED : chipStroke, active ? RED : ink, 13f, 13, 7, 8);
+        chip.setOnClickListener(v -> {
+            hapticTick(v);
+            if (active) {
+                TitleTranslator.setManualVisible(target, false);
+                if (onChanged != null) onChanged.run();
+                return;
+            }
+            if (!TitleTranslator.cached(context, target).isEmpty()) {
+                TitleTranslator.setManualVisible(target, true);
+                if (onChanged != null) onChanged.run();
+                return;
+            }
+            toast(context, "\u6b63\u5728\u7ffb\u8bd1\u6807\u9898\u2026");
+            TitleTranslator.translateSingle(context, target, () -> {
+                if (onChanged != null) onChanged.run();
+            }, () -> toast(context, "\u7ffb\u8bd1\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc"));
+        });
+        actionWrap.addView(chip);
+    }
+
+    public static TextView makeToolbarTranslatePill(Context context, Runnable onClick) {
+        TextView pill = new TextView(context);
+        pill.setText("\u8bd1");
+        pill.setTextSize(13.5f);
+        pill.setTypeface(Typeface.DEFAULT_BOLD);
+        pill.setGravity(Gravity.CENTER);
+        pill.setContentDescription("\u7ffb\u8bd1\u6807\u9898");
+        pill.setTooltipText("\u7ffb\u8bd1\u6807\u9898");
+        attachIosPress(pill, 0.90f);
+        pill.setOnClickListener(v -> {
+            hapticTick(v);
+            if (onClick != null) onClick.run();
+        });
+        return pill;
+    }
+
+    public static void styleToolbarTranslatePill(Context context, TextView pill, int cardColor) {
+        if (context == null || pill == null) return;
+        boolean on = TitleTranslator.enabled(context);
+        boolean light = ThemePalettes.light(cardColor);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(context, 8));
+        if (on) {
+            bg.setColor(0x28fa2d48);
+            bg.setStroke(Math.max(1, dp(context, 1.1f)), RED);
+            pill.setTextColor(RED);
+        } else {
+            bg.setColor(light ? 0x101c2430 : 0x1c58687e);
+            bg.setStroke(Math.max(1, dp(context, 0.8f)), light ? 0x2c202731 : 0x3898a8bc);
+            pill.setTextColor(RED);
+        }
+        pill.setBackground(bg);
     }
 
     private static final class Api31 {

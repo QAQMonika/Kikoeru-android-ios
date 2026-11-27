@@ -112,9 +112,13 @@ public final class BaiduApi {
         apiError(response); return response;
     }
     public JSONArray list(String owner,String directory,int start,int limit) throws Exception {
+        return list(owner,directory,start,limit,"name",false);
+    }
+    public JSONArray list(String owner,String directory,int start,int limit,String order,boolean desc) throws Exception {
         String path=path(directory);
         if(start<0 || limit<1 || limit>1000) throw failure("\u76ee\u5f55\u5206\u9875\u53c2\u6570\u65e0\u6548");
-        JSONObject response=request(owner,"file",params("method","list","dir",path,"order","name","desc","0",
+        String safeOrder=("time".equals(order) || "size".equals(order))?order:"name";
+        JSONObject response=request(owner,"file",params("method","list","dir",path,"order",safeOrder,"desc",desc?"1":"0",
                 "start",String.valueOf(start),"limit",String.valueOf(limit),"web","1"));
         JSONArray result=response.optJSONArray("list"); if(result==null) throw failure("\u767e\u5ea6\u672a\u8fd4\u56de\u76ee\u5f55\u5217\u8868");
         JSONArray clean=new JSONArray();
@@ -124,6 +128,38 @@ public final class BaiduApi {
             id(row.optString("fs_id")); clean.put(row);
         }
         return clean;
+    }
+    public static long rowModified(JSONObject row) {
+        if(row==null) return 0L;
+        long m=row.optLong("server_mtime",0L);
+        if(m>0L) return m;
+        m=row.optLong("server_ctime",0L);
+        if(m>0L) return m;
+        return row.optLong("local_mtime",0L);
+    }
+    public static void sortWorks(List<JSONObject> rows,int mode,Map<String,Long> lastPlayedTimes) {
+        if(rows==null || rows.size()<=1) return;
+        rows.sort((a,b)-> {
+            String na=a.optString("server_filename"), nb=b.optString("server_filename");
+            if(mode==LocalIndex.SORT_NAME_DESC) return LocalIndex.natural(nb,na);
+            if(mode==LocalIndex.SORT_TIME_DESC) {
+                int cmp=Long.compare(rowModified(b),rowModified(a));
+                return cmp!=0?cmp:LocalIndex.natural(nb,na);
+            }
+            if(mode==LocalIndex.SORT_TIME_ASC) {
+                int cmp=Long.compare(rowModified(a),rowModified(b));
+                return cmp!=0?cmp:LocalIndex.natural(na,nb);
+            }
+            if(mode==LocalIndex.SORT_RECENT_PLAYED) {
+                long ta=lastPlayedTimes==null?0L:lastPlayedTimes.getOrDefault(a.optString("path"),0L);
+                long tb=lastPlayedTimes==null?0L:lastPlayedTimes.getOrDefault(b.optString("path"),0L);
+                int cmp=Long.compare(tb,ta);
+                if(cmp!=0) return cmp;
+                cmp=Long.compare(rowModified(b),rowModified(a));
+                return cmp!=0?cmp:LocalIndex.natural(na,nb);
+            }
+            return LocalIndex.natural(na,nb);
+        });
     }
     public String link(String owner,String file,boolean refresh) throws Exception {
         id(owner); id(file); token(owner,false);

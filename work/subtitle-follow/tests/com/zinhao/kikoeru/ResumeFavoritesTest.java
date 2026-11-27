@@ -199,11 +199,100 @@ public final class ResumeFavoritesTest {
         }
         check(bounded.getSharedPreferences("work_last_tracks",0).getAll().size()==500,"Work last-played storage is bounded to 500 works");
     }
+    private static void translateAndSort() throws Exception {
+        Context c=context("translate-sort");
+        check(!TitleTranslator.needsTranslation("") && !TitleTranslator.needsTranslation("RJ01544069") && !TitleTranslator.needsTranslation("12345"),"Pure codes and empty titles skip translation");
+        check(TitleTranslator.needsTranslation("\u8033\u304b\u304d\u3068\u6dfb\u3044\u5bdd"),"Japanese title requires translation");
+        check(!TitleTranslator.enabled(c),"Title translation toggle defaults to off");
+
+        final int[] authCalls={0}, postCalls={0}, googleCalls={0};
+        try {
+            TitleTranslator.setTransportForTest(new TitleTranslator.Transport() {
+                @Override public String get(String url,Map<String,String> headers) {
+                    if(url.contains("edge.microsoft.com")) { authCalls[0]++; return "fake-jwt"; }
+                    googleCalls[0]++;
+                    return "[[[\"\u638f\u8033\u4e0e\u966a\u7761\",\"\u8033\u304b\u304d\",null,null,1]]]";
+                }
+                @Override public String post(String url,Map<String,String> headers,String body) throws java.io.IOException {
+                    postCalls[0]++;
+                    if(!"Bearer fake-jwt".equals(headers.get("Authorization"))) throw new java.io.IOException("missing auth");
+                    return "[{\"translations\":[{\"text\":\"\u6df1\u591c\u638f\u8033\u966a\u7761\"}]}]";
+                }
+            });
+            String jp="\u6df1\u591c\u306e\u8033\u304b\u304d\u3068\u6dfb\u3044\u5bdd";
+            String zh=TitleTranslator.translateSync(c,jp);
+            check("\u6df1\u591c\u638f\u8033\u966a\u7761".equals(zh) && authCalls[0]==1 && postCalls[0]==1,"Edge translate succeeds and parses response");
+            check(TitleTranslator.translateSync(c,jp).equals(zh) && postCalls[0]==1,"Repeated translation hits persistent local cache");
+
+            TitleTranslator.setManualVisible(jp,true);
+            check(TitleTranslator.shouldShowTranslated(c,jp),"Manual single-title click shows translation even when global toggle is off");
+            TitleTranslator.setManualVisible(jp,false);
+            check(!TitleTranslator.shouldShowTranslated(c,jp),"Manual hide switches back to original title");
+            check(TitleTranslator.toggle(c) && TitleTranslator.enabled(c) && TitleTranslator.shouldShowTranslated(c,jp),"Global toggle enables translation display");
+            check(!TitleTranslator.toggle(c) && !TitleTranslator.enabled(c),"Global toggle turns off cleanly");
+
+            // Google gtx fallback when Edge fails
+            TitleTranslator.setTransportForTest(new TitleTranslator.Transport() {
+                @Override public String get(String url,Map<String,String> headers) throws java.io.IOException {
+                    if(url.contains("edge.microsoft.com")) throw new java.io.IOException("edge down");
+                    googleCalls[0]++;
+                    return "[[[\"\u751c\u871c\",\"a\"],[\"\u638f\u8033\",\"b\"]]]";
+                }
+                @Override public String post(String url,Map<String,String> headers,String body) throws java.io.IOException {
+                    throw new java.io.IOException("edge down");
+                }
+            });
+            String jp2="\u7518\u3084\u304b\u3057\u8033\u304b\u304d";
+            check("\u751c\u871c\u638f\u8033".equals(TitleTranslator.translateSync(c,jp2)) && googleCalls[0]==1,"Google gtx fallback joins multi-segment translations");
+            check("\u751c\u871c\u638f\u8033".equals(TitleTranslator.cached(c,jp2)),"Fallback translation is cached locally");
+        } finally {
+            TitleTranslator.setTransportForTest(null);
+        }
+
+        // Local scan modified propagation + sort modes
+        Map<String,List<LocalIndex.Entry>> fs=new HashMap<>();
+        LocalIndex.Entry rootEntry=new LocalIndex.Entry("doc://root","Voice","dir",true,0,1000L);
+        LocalIndex.Entry oldAlbum=new LocalIndex.Entry("doc://old","RJ100001","dir",true,0,2000L);
+        LocalIndex.Entry newAlbum=new LocalIndex.Entry("doc://new","RJ100002","dir",true,0,3000L);
+        fs.put("doc://root",Arrays.asList(oldAlbum,newAlbum));
+        fs.put("doc://old",Collections.singletonList(new LocalIndex.Entry("doc://old/1.wav","1.wav","audio/wav",false,100,2500L)));
+        fs.put("doc://new",Collections.singletonList(new LocalIndex.Entry("doc://new/1.wav","1.wav","audio/wav",false,100,9000L)));
+        JSONObject scanned=LocalIndex.scan(rootEntry,uri->fs.getOrDefault(uri,Collections.emptyList()),new LocalIndex.Progress() {
+            public void update(int f,int t) {}
+            public boolean cancelled() { return false; }
+        });
+        check(scanned.optLong("modified")==9000L,"Local scan propagates newest track modified time to root");
+        List<JSONObject> localAlbums=LocalIndex.albums(new JSONArray().put(scanned));
+        LocalIndex.sortAlbums(localAlbums,LocalIndex.SORT_TIME_DESC,null);
+        check("RJ100002".equals(localAlbums.get(0).optString("name")),"Local SORT_TIME_DESC puts newest work first");
+        LocalIndex.sortAlbums(localAlbums,LocalIndex.SORT_TIME_ASC,null);
+        check("RJ100001".equals(localAlbums.get(0).optString("name")),"Local SORT_TIME_ASC puts oldest work first");
+        LocalIndex.sortAlbums(localAlbums,LocalIndex.SORT_NAME_DESC,null);
+        check("RJ100002".equals(localAlbums.get(0).optString("name")),"Local SORT_NAME_DESC reverses natural name order");
+        Map<String,Long> localPlayed=new HashMap<>();
+        localPlayed.put("doc://old",50000L);
+        LocalIndex.sortAlbums(localAlbums,LocalIndex.SORT_RECENT_PLAYED,localPlayed);
+        check("RJ100001".equals(localAlbums.get(0).optString("name")),"Local SORT_RECENT_PLAYED puts recently listened work first");
+
+        // Baidu Cloud sort modes
+        List<JSONObject> cloudRows=new ArrayList<>(Arrays.asList(
+                new JSONObject().put("server_filename","RJ100001").put("path","/apps/Kikoeru/RJ100001").put("server_mtime",1700000100L),
+                new JSONObject().put("server_filename","RJ100009").put("path","/apps/Kikoeru/RJ100009").put("server_mtime",1700000900L),
+                new JSONObject().put("server_filename","RJ100005").put("path","/apps/Kikoeru/RJ100005").put("server_mtime",1700000500L)));
+        BaiduApi.sortWorks(cloudRows,LocalIndex.SORT_TIME_DESC,null);
+        check("RJ100009".equals(cloudRows.get(0).optString("server_filename")) && "RJ100005".equals(cloudRows.get(1).optString("server_filename")),"Cloud SORT_TIME_DESC puts newest uploaded work first");
+        BaiduApi.sortWorks(cloudRows,LocalIndex.SORT_TIME_ASC,null);
+        check("RJ100001".equals(cloudRows.get(0).optString("server_filename")),"Cloud SORT_TIME_ASC puts earliest uploaded work first");
+        Map<String,Long> cloudPlayed=new HashMap<>();
+        cloudPlayed.put("/apps/Kikoeru/RJ100005",999999L);
+        BaiduApi.sortWorks(cloudRows,LocalIndex.SORT_RECENT_PLAYED,cloudPlayed);
+        check("RJ100005".equals(cloudRows.get(0).optString("server_filename")),"Cloud SORT_RECENT_PLAYED puts recently listened work first");
+    }
     public static void main(String[] args) throws Exception {
         Field field=PlaybackPosition.class.getDeclaredField("IO"); field.setAccessible(true);
         ExecutorService io=(ExecutorService)field.get(null);
         try {
-            bookmarks(); playback(); favorites(); workLastPlayedAndProgress();
+            bookmarks(); playback(); favorites(); workLastPlayedAndProgress(); translateAndSort();
             io.submit(()->{}).get(5,TimeUnit.SECONDS);
             System.out.println("PASS: "+checks+" per-track resume and independent local favorites checks");
         } finally { io.shutdown(); io.awaitTermination(5,TimeUnit.SECONDS); }

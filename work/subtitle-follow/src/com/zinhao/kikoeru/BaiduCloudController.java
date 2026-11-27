@@ -29,12 +29,13 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
     private JSONObject currentLastPlayed;
     private int page,card,bar,next,loadGeneration,authGeneration,paletteIndex;
     private boolean loading,bound,favorites,more,authorizing,liquidState;
-    private TextView title,status,empty;
+    private TextView title,status,empty,translateBtn;
     private EditText search;
     private GridView grid;
     private ListView list;
     private Button action,loadMore;
-    private ImageButton favoriteTab,folderBack;
+    private ImageButton favoriteTab,folderBack,sortBtn;
+    private int sortMode;
     private LinearLayout dock,headerBar,detailHeader;
     private FrameLayout detailContainer;
     private GlassUi.Navigation navigation;
@@ -51,6 +52,7 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
     View view() { return view; }
     void create(Bundle state) {
         int palette=ThemePalettes.selected(this); paletteIndex=palette; liquidState=PlaybackOptions.liquidGlass(this); page=ThemePalettes.color(palette,1); card=ThemePalettes.color(palette,2); bar=ThemePalettes.color(palette,3);
+        sortMode=getSharedPreferences("baidu_library",0).getInt("sort_mode",LocalIndex.SORT_NAME_ASC);
         if(state!=null) { path=state.getString("cloud_path",""); favorites=state.getBoolean("cloud_favorites",false); }
         else favorites=getIntent().getIntExtra(AppShell.EXTRA_TAB,0)==1;
         build();
@@ -108,6 +110,12 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         }
         ImageButton searchButton=button("ic_baseline_search_24","\u641c\u7d22",v->toggleSearch());
         searchButton.setVisibility(View.GONE); toolbar.addView(searchButton,new LinearLayout.LayoutParams(btnSize,barHeight));
+        translateBtn=GlassUi.makeToolbarTranslatePill(this,this::toggleTranslate);
+        LinearLayout.LayoutParams trLp=new LinearLayout.LayoutParams(dp(34),dp(28));
+        trLp.rightMargin=dp(2);
+        toolbar.addView(translateBtn,trLp);
+        sortBtn=button("ic_baseline_sort_24","\u6392\u5e8f",v->chooseSort());
+        toolbar.addView(sortBtn,new LinearLayout.LayoutParams(btnSize,barHeight));
         toolbar.addView(button("ic_baseline_loop_24","\u5237\u65b0",v-> { if(!owner.isEmpty()) load(path,false); }),new LinearLayout.LayoutParams(btnSize,barHeight));
         toolbar.addView(button("ic_baseline_more_horiz_24","\u66f4\u591a",v->menu()),new LinearLayout.LayoutParams(btnSize,barHeight)); container.addView(toolbar);
         if(!embedded) {
@@ -195,6 +203,7 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         search.setHintTextColor(muted()); search.setBackground(GlassUi.searchFieldBackground(this,card));
         for(int i=0;i<headerBar.getChildCount();i++) if(headerBar.getChildAt(i) instanceof ImageButton)
             ((ImageButton)headerBar.getChildAt(i)).setImageTintList(ColorStateList.valueOf(accent()));
+        GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
         action.setTextColor(0xffffffff); action.setBackground(GlassUi.iosPressable(this,accent(),22,0,0,0));
         loadMore.setTextColor(ink()); loadMore.setBackgroundColor(page);
         list.setAdapter(files); grid.setAdapter(albums);
@@ -238,8 +247,11 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         if(append && loading) return;
         final String folder=destination,account=owner; final int offset=append?next:0,generation=++loadGeneration;
         favorites=false; path=destination; loading=true; if(!append) { entries=new JSONArray(); next=0; search.setText(""); } rows();
+        final boolean atRoot=folder.equals(rootPath);
+        final String apiOrder=atRoot && (sortMode==LocalIndex.SORT_TIME_DESC || sortMode==LocalIndex.SORT_TIME_ASC)?"time":"name";
+        final boolean apiDesc=atRoot && (sortMode==LocalIndex.SORT_TIME_DESC || sortMode==LocalIndex.SORT_NAME_DESC);
         BaiduCloud.IO.execute(()-> {
-            try { JSONArray loaded=BaiduCloud.api(this).list(account,folder,offset,200);
+            try { JSONArray loaded=BaiduCloud.api(this).list(account,folder,offset,200,apiOrder,apiDesc);
                 ui(()-> {
                     if(generation!=loadGeneration || !owner.equals(account)) return;
                     Set<String> seen=new HashSet<>(); for(int i=0;i<entries.length();i++) seen.add(entries.optJSONObject(i).optString("fs_id"));
@@ -263,6 +275,22 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
             }
         }
         boolean inSubfolder=!path.isEmpty() && !path.equals(rootPath) && !favorites;
+        if(!inSubfolder && !visible.isEmpty()) {
+            Map<String,Long> playedMap=null;
+            if(sortMode==LocalIndex.SORT_RECENT_PLAYED) {
+                playedMap=new HashMap<>();
+                for(JSONObject row:visible) {
+                    JSONObject lp=TrackResume.lastPlayedForCloudFolder(this,owner,row.optString("path"));
+                    if(lp!=null) playedMap.put(row.optString("path"),lp.optLong("time",0L));
+                }
+            }
+            BaiduApi.sortWorks(visible,sortMode,playedMap);
+        }
+        if(sortBtn!=null) sortBtn.setVisibility(!owner.isEmpty() && !rootPath.isEmpty() && !inSubfolder?View.VISIBLE:View.GONE);
+        if(translateBtn!=null) {
+            translateBtn.setVisibility(!owner.isEmpty() && !rootPath.isEmpty()?View.VISIBLE:View.GONE);
+            GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
+        }
         title.setText(favorites?"\u4e91\u7aef\u6536\u85cf":path.equals(rootPath)?"\u767e\u5ea6\u7f51\u76d8":BaiduApi.name(path));
         title.setVisibility(ShellState.embeddedTitleVisible(embedded,inSubfolder)?View.VISIBLE:View.GONE);
         folderBack.setVisibility(ShellState.folderBackVisible(embedded,inSubfolder)?View.VISIBLE:View.GONE);
@@ -632,6 +660,50 @@ public final class BaiduCloudController extends ContextWrapper implements Servic
         }
         pendingResumeCloudId=cloudId;
         load(targetFolder,false);
+    }
+
+    private void toggleTranslate() {
+        boolean on=TitleTranslator.toggle(this);
+        GlassUi.styleToolbarTranslatePill(this,translateBtn,card);
+        if(on) {
+            List<String> titles=new ArrayList<>();
+            for(JSONObject row:visible) {
+                String raw=row.optString("server_filename");
+                String stripped=GlassUi.stripRj(raw);
+                String t=stripped;
+                if(t.isEmpty()) {
+                    JSONObject meta=GlassUi.rjMeta(this,raw,null);
+                    if(meta!=null) t=meta.optString("title");
+                }
+                if(t.isEmpty()) t=raw;
+                if(TitleTranslator.needsTranslation(t) && TitleTranslator.cached(this,t).isEmpty()) titles.add(t);
+            }
+            if(!titles.isEmpty()) {
+                GlassUi.toast(this,"\u6b63\u5728\u7ffb\u8bd1\u6807\u9898\u2026");
+                TitleTranslator.translateBatch(this,titles,()-> { if(!isFinishing() && !isDestroyed()) rows(); });
+            } else {
+                GlassUi.toast(this,"\u5df2\u5207\u6362\u4e3a\u4e2d\u6587\u6807\u9898");
+            }
+        } else {
+            GlassUi.toast(this,"\u5df2\u5207\u56de\u539f\u9898");
+        }
+        rows();
+    }
+
+    private void chooseSort() {
+        if(owner.isEmpty() || rootPath.isEmpty()) return;
+        show(dialog("\u6392\u5e8f\u65b9\u5f0f").setSingleChoiceItems(LocalIndex.SORT_LABELS,sortMode,(d,which)-> {
+            d.dismiss();
+            sortMode=which;
+            getSharedPreferences("baidu_library",0).edit().putInt("sort_mode",which).apply();
+            GlassUi.toast(this,"\u6392\u5e8f\uff1a"+LocalIndex.SORT_LABELS[which]);
+            if(!favorites && path.equals(rootPath)) {
+                load(path,false);
+            } else {
+                rows();
+                grid.setSelection(0); list.setSelection(0);
+            }
+        }));
     }
     void onStop() { if(mini!=null) mini.active(false); }
     void onDestroy() {

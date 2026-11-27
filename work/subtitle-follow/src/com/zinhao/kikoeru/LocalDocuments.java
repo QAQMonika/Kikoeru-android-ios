@@ -19,12 +19,13 @@ public final class LocalDocuments implements LocalIndex.Provider {
     private final Uri tree;
     private static final String[] COLUMNS={DocumentsContract.Document.COLUMN_DOCUMENT_ID,
             DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE,
-            DocumentsContract.Document.COLUMN_SIZE};
+            DocumentsContract.Document.COLUMN_SIZE,DocumentsContract.Document.COLUMN_LAST_MODIFIED};
     public LocalDocuments(Context context, Uri tree) { this.context=context.getApplicationContext(); this.tree=tree; }
     private LocalIndex.Entry entry(Cursor c) {
         String id=c.getString(0), mime=c.getString(2);
         return new LocalIndex.Entry(DocumentsContract.buildDocumentUriUsingTree(tree,id).toString(),
-                c.getString(1),mime,DocumentsContract.Document.MIME_TYPE_DIR.equals(mime),c.isNull(3)?0:c.getLong(3));
+                c.getString(1),mime,DocumentsContract.Document.MIME_TYPE_DIR.equals(mime),
+                c.isNull(3)?0:c.getLong(3),c.isNull(4)?0:c.getLong(4));
     }
     public LocalIndex.Entry root() throws Exception {
         Uri doc=DocumentsContract.buildDocumentUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));

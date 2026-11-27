@@ -99,7 +99,7 @@ try {
     Check-Exit 'Disassembler compilation'
     # Only production helper classes enter D8; no compile stubs or test classes ship.
     $productionClasses = Get-ChildItem "$buildRoot\classes\com\zinhao\kikoeru" -Filter '*.class' |
-        Where-Object Name -Match '^(AppShell|GlassUi|ShellState|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\$.*)?\.class$' |
+        Where-Object Name -Match '^(AppShell|GlassUi|ShellState|TitleTranslator|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\$.*)?\.class$' |
         ForEach-Object FullName
     $d8Libraries = @('--lib', $androidJar, '--classpath', "$buildRoot\classes")
     foreach ($dependency in ($classPath.Split(';') | Select-Object -Skip 1)) {
@@ -115,7 +115,7 @@ try {
         $oldHelperDirectory = Join-Path $projectRoot "work\reference-apk\$dexDirectory\com\zinhao\kikoeru"
         if (Test-Path -LiteralPath $oldHelperDirectory) {
             Get-ChildItem -LiteralPath $oldHelperDirectory -Filter '*.smali' |
-                Where-Object Name -Match '^(AppShell|GlassUi|ShellState|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\$.*)?\.smali$' |
+                Where-Object Name -Match '^(AppShell|GlassUi|ShellState|TitleTranslator|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\$.*)?\.smali$' |
                 ForEach-Object { Remove-Item -LiteralPath $_.FullName }
         }
     }

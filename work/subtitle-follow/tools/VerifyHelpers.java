@@ -450,7 +450,7 @@ public final class VerifyHelpers {
                 if(type.equals("Lcom/zinhao/kikoeru/GlassUi$Navigation;")) glassNavigation=definition;
                 if (!types.add(type)) throw new AssertionError("Duplicate shipped class: " + type);
                 if (entry.equals("classes3.dex")) {
-                    if (!type.matches("Lcom/zinhao/kikoeru/(AppShell|GlassUi|ShellState|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\\$[^;]*)?;"))
+                    if (!type.matches("Lcom/zinhao/kikoeru/(AppShell|GlassUi|ShellState|TitleTranslator|BaiduApi|BaiduHttp|BaiduVault|BaiduCloud|BaiduArt|BaiduArtMedia|BaiduUpload|BaiduUploadHttp|BaiduTransfer|BaiduPlayback|BaiduCloudActivity|BaiduCloudController|LrcAutoFollow|LrcSelection|LrcVisuals|PlaybackPosition|PlaybackOptions|TrackResume|LocalFavorites|ThemePalettes|ThemePaletteActivity|LocalIndex|LocalDocuments|LocalPlayback|LocalLibraryActivity|LocalLibraryController|LocalArt|LocalWaveArt|LocalHistory|LocalDeletion|CatalogState|PlayerNavigation|PlayerArtwork|MiniPlayer|PlaybackQueueActivity)(\\$[^;]*)?;"))
                         throw new AssertionError("Unexpected helper dex class: " + type);
                     helpers++;
                 }

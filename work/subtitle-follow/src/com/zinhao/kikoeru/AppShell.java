@@ -651,8 +651,11 @@ public final class AppShell {
 
             // 2. Title
             String title = work.optString("title", rj);
-            titleView.setText(title);
-            titleView.setTextColor(ink);
+            if (TitleTranslator.enabled(activity) && TitleTranslator.needsTranslation(title)
+                    && TitleTranslator.cached(activity, title).isEmpty()) {
+                TitleTranslator.translateBatch(activity, java.util.Collections.singletonList(title), this::refresh);
+            }
+            GlassUi.applyTranslatedTitle(activity, titleView, title, ink, muted, true);
 
             // 3. Interactive Review Status Chips + Play All + Copy RJ
             actionWrap.removeAllViews();
@@ -702,6 +705,7 @@ public final class AppShell {
                 });
                 actionWrap.addView(copyChip);
             }
+            GlassUi.addTranslateTitleChip(activity, actionWrap, title, chipBg, chipStroke, ink, this::refresh);
 
             // 4. Info lines
             TextView lineSource = (TextView)infoList.getChildAt(0);

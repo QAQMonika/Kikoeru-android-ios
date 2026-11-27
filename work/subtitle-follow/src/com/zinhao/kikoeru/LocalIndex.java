@@ -8,13 +8,29 @@ import org.json.JSONObject;
 
 /** Provider-independent, iterative folder indexing. Audio bytes are never copied. */
 public final class LocalIndex {
+    public static final int SORT_NAME_ASC=0;
+    public static final int SORT_NAME_DESC=1;
+    public static final int SORT_TIME_DESC=2;
+    public static final int SORT_TIME_ASC=3;
+    public static final int SORT_RECENT_PLAYED=4;
+    public static final String[] SORT_LABELS={
+            "\u540d\u79f0 A \u2192 Z",
+            "\u540d\u79f0 Z \u2192 A",
+            "\u6700\u65b0\u4e0a\u4f20 / \u4fee\u6539",
+            "\u6700\u65e9\u4e0a\u4f20 / \u4fee\u6539",
+            "\u6700\u8fd1\u542c\u8fc7"
+    };
+
     public static final class Entry {
         public final String uri, name, mime;
         public final boolean directory;
-        public final long size;
+        public final long size, modified;
         public Entry(String uri, String name, String mime, boolean directory, long size) {
+            this(uri, name, mime, directory, size, 0L);
+        }
+        public Entry(String uri, String name, String mime, boolean directory, long size, long modified) {
             this.uri = uri; this.name = name; this.mime = mime;
-            this.directory = directory; this.size = size;
+            this.directory = directory; this.size = size; this.modified = modified;
         }
     }
     public interface Provider { List<Entry> children(String uri) throws Exception; }
@@ -66,7 +82,7 @@ public final class LocalIndex {
     private static JSONObject node(Folder folder) throws Exception {
         return new JSONObject().put("uri",folder.entry.uri).put("name",folder.entry.name)
                 .put("parent",folder.parent).put("path",folder.path).put("directory",true)
-                .put("cover",folder.cover).put("count",0);
+                .put("cover",folder.cover).put("count",0).put("modified",folder.entry.modified);
     }
     public static JSONObject scan(Entry root, Provider provider, Progress progress) throws Exception {
         List<JSONObject> nodes=new ArrayList<>();
@@ -106,7 +122,7 @@ public final class LocalIndex {
                     Entry subtitle=subtitles.get(stem(e.name));
                     nodes.add(new JSONObject().put("uri",e.uri).put("name",e.name)
                             .put("parent",folder.entry.uri).put("path",folder.path+"/"+e.name)
-                            .put("directory",false).put("size",e.size).put("cover",cover)
+                            .put("directory",false).put("size",e.size).put("modified",e.modified).put("cover",cover)
                             .put("subtitle",subtitle==null?"":subtitle.uri));
                     tracks++;
                 }
@@ -115,13 +131,22 @@ public final class LocalIndex {
         }
         for(JSONObject n:nodes) if(!n.optBoolean("directory")) {
             boolean hasSub=!n.optString("subtitle").isEmpty();
+            long mod=n.optLong("modified",0L);
             Set<String> chain=new HashSet<>(); String p=n.optString("parent");
             while(directories.containsKey(p) && chain.add(p)) {
                 JSONObject dir=directories.get(p);
                 dir.put("count",dir.optInt("count")+1);
+                if(mod>dir.optLong("modified",0L)) dir.put("modified",mod);
                 if(hasSub) dir.put("lyric",true);
                 p=dir.optString("parent");
             }
+        }
+        for(int i=nodes.size()-1;i>=0;i--) {
+            JSONObject child=nodes.get(i);
+            if(!child.optBoolean("directory")) continue;
+            long mod=child.optLong("modified",0L);
+            JSONObject parent=directories.get(child.optString("parent"));
+            if(parent!=null && mod>parent.optLong("modified",0L)) parent.put("modified",mod);
         }
         // Artwork-only subfolders are useful even though they are hidden from the audio browser.
         for(int i=nodes.size()-1;i>=0;i--) {
@@ -139,8 +164,10 @@ public final class LocalIndex {
         }
         JSONArray entries=new JSONArray();
         for(JSONObject n:nodes) if(!n.optBoolean("directory") || n.optInt("count")>0 || n.optString("uri").equals(root.uri)) entries.put(n);
+        JSONObject rootDir=directories.get(root.uri);
+        long rootMod=rootDir!=null?rootDir.optLong("modified",root.modified):root.modified;
         JSONObject result=new JSONObject().put("uri",root.uri).put("name",root.name).put("count",tracks)
-                .put("scanned",System.currentTimeMillis()).put("entries",entries);
+                .put("modified",rootMod).put("scanned",System.currentTimeMillis()).put("entries",entries);
         artHints(new JSONArray().put(result));
         return result;
     }
@@ -238,9 +265,43 @@ public final class LocalIndex {
             for(JSONObject child:children) if(!child.optBoolean("directory")) directAudio=true;
             if(directAudio || children.isEmpty()) {
                 if(seen.add(document)) albums.add(new JSONObject(root.toString()).put("directory",true).put("source",root.optString("uri")));
-            } else for(JSONObject child:children) if(seen.add(child.optString("uri"))) albums.add(child);
+            } else for(JSONObject child:children) if(seen.add(child.optString("uri"))) {
+                if(child.optLong("scanned",0L)==0L && root.optLong("scanned",0L)>0L) child.put("scanned",root.optLong("scanned",0L));
+                albums.add(child);
+            }
         }
         albums.sort((a,b)->natural(a.optString("name"),b.optString("name")));
         return albums;
+    }
+
+    public static long effectiveModified(JSONObject node) {
+        if(node==null) return 0L;
+        long m=node.optLong("modified",0L);
+        return m>0L?m:node.optLong("scanned",0L);
+    }
+
+    public static void sortAlbums(List<JSONObject> rows, int mode, Map<String, Long> lastPlayedTimes) {
+        if(rows==null || rows.size()<=1) return;
+        rows.sort((a,b)-> {
+            String na=a.optString("name"), nb=b.optString("name");
+            if(mode==SORT_NAME_DESC) return natural(nb,na);
+            if(mode==SORT_TIME_DESC) {
+                int cmp=Long.compare(effectiveModified(b),effectiveModified(a));
+                return cmp!=0?cmp:natural(nb,na);
+            }
+            if(mode==SORT_TIME_ASC) {
+                int cmp=Long.compare(effectiveModified(a),effectiveModified(b));
+                return cmp!=0?cmp:natural(na,nb);
+            }
+            if(mode==SORT_RECENT_PLAYED) {
+                long ta=lastPlayedTimes==null?0L:lastPlayedTimes.getOrDefault(a.optString("uri"),0L);
+                long tb=lastPlayedTimes==null?0L:lastPlayedTimes.getOrDefault(b.optString("uri"),0L);
+                int cmp=Long.compare(tb,ta);
+                if(cmp!=0) return cmp;
+                cmp=Long.compare(effectiveModified(b),effectiveModified(a));
+                return cmp!=0?cmp:natural(na,nb);
+            }
+            return natural(na,nb);
+        });
     }
 }
